@@ -138,7 +138,7 @@ const MAIN_KEYBOARD = {
     [{ text: '🔄 Сброс' },       { text: '📖 Гайд' }],
   ],
   resize_keyboard: true,
-  persistent:      true,
+  is_persistent:   true,
 }
 
 // Keyboard button text → natural-language query passed to AI
