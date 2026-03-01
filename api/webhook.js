@@ -2,7 +2,7 @@
 // Runs on Vercel Edge Runtime
 // Redis (Upstash) stores conversation history per user — no SDK needed, using REST API directly
 
-import { MINTHARA_SYSTEM_PROMPT, ROMANCE_MODE_ADDENDUM, GUIDE_CONTEXT_PREFIX } from '../src/ai/systemPrompt.js'
+import { MINTHARA_SYSTEM_PROMPT, ROMANCE_MODE_ADDENDUM, INTIMATE_MODE_ADDENDUM, GUIDE_CONTEXT_PREFIX } from '../src/ai/systemPrompt.js'
 import { routeQuery } from '../src/ai/modelRouter.js'
 import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
 import { callAI } from '../src/ai/callAI.js'
@@ -127,9 +127,22 @@ function checkRateLimit(userId) {
 const ROMANCE_KEYWORDS = ['люблю', 'любовь', 'поцелу', 'обними', 'ночь', 'постель',
   'вместе', 'красив', 'флирт', 'приди', 'хочу тебя', 'kiss', 'love', 'hold me', 'beautiful']
 
+const INTIMATE_KEYWORDS = [
+  'займёмся', 'займемся', 'переспи', 'переспать', 'в постель', 'в кровать',
+  'ляжем', 'ляг со мной', 'хочу тебя', 'хочу тебе', 'трахн', 'секс', 'интим',
+  'раздень', 'разденься', 'обнажи', 'возьми меня', 'будь моей', 'будь моим',
+  'плотские', 'утех', 'соблазн', 'страсть', 'desire', 'fuck', 'bed with me',
+  'make love', 'sleep with', 'take me', 'undress',
+]
+
 function detectRomance(text) {
   const lower = text.toLowerCase()
   return ROMANCE_KEYWORDS.some(kw => lower.includes(kw))
+}
+
+function detectIntimate(text) {
+  const lower = text.toLowerCase()
+  return INTIMATE_KEYWORDS.some(kw => lower.includes(kw))
 }
 
 // ─── Main handler ────────────────────────────────────────────────────────────
@@ -252,13 +265,18 @@ export default async function handler(req) {
 
   const session = await getSession(userId)
 
-  // Detect romance mode
+  // Detect romance / intimate mode
   if (detectRomance(text)) session.romanceMode = true
+  if (detectIntimate(text)) session.intimateMode = true
 
   // Build system prompt
   const route = routeQuery(text)
   let systemPrompt = MINTHARA_SYSTEM_PROMPT
-  if (session.romanceMode) systemPrompt += ROMANCE_MODE_ADDENDUM
+  if (session.intimateMode) {
+    systemPrompt += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM
+  } else if (session.romanceMode) {
+    systemPrompt += ROMANCE_MODE_ADDENDUM
+  }
   if (route.knowledgeKeys.length > 0) {
     systemPrompt += GUIDE_CONTEXT_PREFIX
     systemPrompt += getKnowledgeContext(route.knowledgeKeys)

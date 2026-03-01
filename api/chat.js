@@ -1,7 +1,7 @@
 // Mini App → Anthropic proxy
 // Runs on Vercel Edge Runtime — ANTHROPIC_API_KEY stays server-side
 
-import { MINTHARA_SYSTEM_PROMPT, ROMANCE_MODE_ADDENDUM, GUIDE_CONTEXT_PREFIX } from '../src/ai/systemPrompt.js'
+import { MINTHARA_SYSTEM_PROMPT, ROMANCE_MODE_ADDENDUM, INTIMATE_MODE_ADDENDUM, GUIDE_CONTEXT_PREFIX } from '../src/ai/systemPrompt.js'
 import { routeQuery } from '../src/ai/modelRouter.js'
 import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
 import { callAI } from '../src/ai/callAI.js'
@@ -38,7 +38,7 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
   }
 
-  const { messages, romanceMode } = body
+  const { messages, romanceMode, intimateMode } = body
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return new Response(JSON.stringify({ error: 'messages array required' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
@@ -50,7 +50,11 @@ export default async function handler(req) {
 
   // Build system prompt
   let systemPrompt = MINTHARA_SYSTEM_PROMPT
-  if (romanceMode) systemPrompt += ROMANCE_MODE_ADDENDUM
+  if (intimateMode) {
+    systemPrompt += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM
+  } else if (romanceMode) {
+    systemPrompt += ROMANCE_MODE_ADDENDUM
+  }
   if (route.knowledgeKeys.length > 0) {
     systemPrompt += GUIDE_CONTEXT_PREFIX
     systemPrompt += getKnowledgeContext(route.knowledgeKeys)

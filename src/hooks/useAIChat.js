@@ -34,13 +34,29 @@ async function loadHistory() {
   } catch { return null }
 }
 
+const ROMANCE_KW = ['люблю', 'любовь', 'поцелу', 'обними', 'ночь', 'постель',
+  'флирт', 'хочу тебя', 'kiss', 'love', 'hold me', 'beautiful']
+
+const INTIMATE_KW = [
+  'займёмся', 'займемся', 'переспи', 'переспать', 'в постель', 'в кровать',
+  'ляжем', 'ляг со мной', 'хочу тебя', 'трахн', 'секс', 'интим',
+  'раздень', 'разденься', 'обнажи', 'возьми меня', 'будь моей', 'будь моим',
+  'плотские', 'утех', 'desire', 'fuck', 'bed with me', 'make love', 'sleep with',
+  'take me', 'undress',
+]
+
 // Detect romance mode from message history
 function detectRomanceMode(messages) {
-  const keywords = ['люблю', 'любовь', 'поцелу', 'обними', 'ночь', 'постель',
-    'флирт', 'хочу тебя', 'kiss', 'love', 'hold me', 'beautiful']
-  return messages
-    .filter(m => m.role === 'user')
-    .some(m => keywords.some(kw => m.content.toLowerCase().includes(kw)))
+  const userMsgs = messages.filter(m => m.role === 'user')
+  return userMsgs.some(m => ROMANCE_KW.some(kw => m.content.toLowerCase().includes(kw)))
+}
+
+// Detect intimate mode — only from the latest user message
+function detectIntimateMode(messages) {
+  const last = [...messages].reverse().find(m => m.role === 'user')
+  if (!last) return false
+  const lower = last.content.toLowerCase()
+  return INTIMATE_KW.some(kw => lower.includes(kw))
 }
 
 export function useAIChat() {
@@ -95,6 +111,7 @@ export function useAIChat() {
         body: JSON.stringify({
           messages: apiMessages,
           romanceMode: detectRomanceMode(updated),
+          intimateMode: detectIntimateMode(updated),
         }),
       })
 
