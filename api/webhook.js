@@ -5,6 +5,7 @@
 import { MINTHARA_SYSTEM_PROMPT, ROMANCE_MODE_ADDENDUM, GUIDE_CONTEXT_PREFIX } from '../src/ai/systemPrompt.js'
 import { routeQuery } from '../src/ai/modelRouter.js'
 import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
+import { callAI } from '../src/ai/callAI.js'
 
 export const config = { runtime: 'edge' }
 
@@ -268,35 +269,20 @@ export default async function handler(req) {
   const apiMessages = session.messages.map(m => ({ role: m.role, content: m.content }))
 
   try {
-    const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: route.model,
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: apiMessages,
-      }),
-    })
-
-    if (!aiRes.ok) {
-      throw new Error(`Anthropic ${aiRes.status}`)
-    }
-
-    const aiData = await aiRes.json()
-    const reply = aiData.content?.filter(b => b.type === 'text').map(b => b.text).join('') || ''
+    const { text: reply, usedSearch } = await callAI(anthropicKey, route.model, systemPrompt, apiMessages)
 
     // Save assistant reply to session
     session.messages.push({ role: 'assistant', content: reply })
     await saveSession(userId, session)
 
+    // If search was used — show subtle indicator in character
+    const finalReply = usedSearch
+      ? reply + '\n\n_🕵️ Тени нашептали свежие сведения..._'
+      : reply
+
     // Try Markdown, fallback plain
     try {
-      await tgSend(botToken, chatId, reply)
+      await tgSend(botToken, chatId, finalReply)
     } catch {
       await tgSendPlain(botToken, chatId, reply)
     }

@@ -4,6 +4,7 @@
 import { MINTHARA_SYSTEM_PROMPT, ROMANCE_MODE_ADDENDUM, GUIDE_CONTEXT_PREFIX } from '../src/ai/systemPrompt.js'
 import { routeQuery } from '../src/ai/modelRouter.js'
 import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
+import { callAI } from '../src/ai/callAI.js'
 
 export const config = { runtime: 'edge' }
 
@@ -59,33 +60,9 @@ export default async function handler(req) {
   const apiMessages = messages.map(m => ({ role: m.role, content: m.content }))
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: route.model,
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: apiMessages,
-      }),
-    })
+    const { text, usedSearch, searchQuery } = await callAI(apiKey, route.model, systemPrompt, apiMessages)
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      return new Response(JSON.stringify({ error: err.error?.message || `Anthropic error ${res.status}` }), {
-        status: res.status,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      })
-    }
-
-    const data = await res.json()
-    const text = data.content?.filter(b => b.type === 'text').map(b => b.text).join('') || ''
-
-    return new Response(JSON.stringify({ text, model: route.model, queryType: route.queryType }), {
+    return new Response(JSON.stringify({ text, model: route.model, queryType: route.queryType, usedSearch, searchQuery }), {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     })
   } catch (err) {
