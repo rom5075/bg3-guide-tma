@@ -37,26 +37,26 @@ function LocationDetail({ loc, onClose }) {
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, zIndex: 200,
+        position: 'fixed', inset: 0, zIndex: 1100,
         background: 'rgba(0,0,0,.75)',
-        display: 'flex', alignItems: 'flex-end',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
         backdropFilter: 'blur(2px)',
+        padding: '20px',
       }}
     >
       <div
         onClick={e => e.stopPropagation()}
         style={{
           width: '100%',
+          maxWidth: 400,
           background: 'linear-gradient(180deg, #0e0a14, #08050a)',
           border: '1px solid rgba(42,25,28,.8)',
-          borderBottom: 'none',
-          borderTopLeftRadius: 16,
-          borderTopRightRadius: 16,
-          padding: '20px 18px 32px',
+          borderRadius: 16,
+          padding: '20px 18px 24px',
+          maxHeight: '70vh',
+          overflowY: 'auto',
         }}
       >
-        {/* Drag handle */}
-        <div style={{ width: 36, height: 3, background: '#3a2a2a', borderRadius: 2, margin: '0 auto 16px' }} />
 
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 12 }}>
           <div style={{
