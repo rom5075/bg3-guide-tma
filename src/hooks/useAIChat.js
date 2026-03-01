@@ -1,11 +1,16 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { buildSystemPrompt, CHAT_STORAGE_KEY, MAX_HISTORY_MESSAGES } from '../data/aiPrompt'
+import { CHAT_STORAGE_KEY, MAX_HISTORY_MESSAGES } from '../data/aiPrompt'
 
 const tg = window.Telegram?.WebApp
 
 // Persist chat history via Telegram CloudStorage (if available) or localStorage
 async function saveHistory(messages) {
-  const data = JSON.stringify(messages.slice(-MAX_HISTORY_MESSAGES))
+  // Keep last N messages but trim content to avoid hitting CloudStorage 4KB limit
+  const trimmed = messages.slice(-MAX_HISTORY_MESSAGES).map(m => ({
+    ...m,
+    content: m.content.length > 300 ? m.content.slice(0, 300) + '…' : m.content,
+  }))
+  const data = JSON.stringify(trimmed)
   try {
     if (tg?.CloudStorage?.setItem) {
       await new Promise((res, rej) =>
@@ -27,6 +32,15 @@ async function loadHistory() {
       return localStorage.getItem(CHAT_STORAGE_KEY)
     }
   } catch { return null }
+}
+
+// Detect romance mode from message history
+function detectRomanceMode(messages) {
+  const keywords = ['люблю', 'любовь', 'поцелу', 'обними', 'ночь', 'постель',
+    'флирт', 'хочу тебя', 'kiss', 'love', 'hold me', 'beautiful']
+  return messages
+    .filter(m => m.role === 'user')
+    .some(m => keywords.some(kw => m.content.toLowerCase().includes(kw)))
 }
 
 export function useAIChat() {
@@ -66,7 +80,7 @@ export function useAIChat() {
     setLoading(true)
     setError(null)
 
-    // Build API messages (only role + content)
+    // Send full content to API (trimming only happens on storage)
     const apiMessages = updated
       .slice(-MAX_HISTORY_MESSAGES)
       .map(m => ({ role: m.role, content: m.content }))
@@ -74,15 +88,13 @@ export function useAIChat() {
     try {
       abortRef.current = new AbortController()
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         signal: abortRef.current.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          system: buildSystemPrompt(),
           messages: apiMessages,
+          romanceMode: detectRomanceMode(updated),
         }),
       })
 
@@ -92,10 +104,7 @@ export function useAIChat() {
       }
 
       const data = await res.json()
-      const assistantText = data.content
-        ?.filter(b => b.type === 'text')
-        .map(b => b.text)
-        .join('') || ''
+      const assistantText = data.text || ''
 
       const assistantMsg = {
         id: Date.now() + 1,
