@@ -5,12 +5,12 @@
 
 const WEB_SEARCH_TOOL = {
   name: 'web_search',
-  description: `Search the internet for BG3-related information. Use ONLY when:
-- User asks about recent patches, hotfixes or updates to Baldur's Gate 3
-- User asks about something that is clearly not in your existing knowledge
-- User explicitly asks to "find", "search" or "look up" something
-Do NOT use for general gameplay questions, builds, romances or locations you already know.
-ALWAYS include "Baldur's Gate 3" or "BG3" in the query for relevant results.`,
+  description: `Search the internet for any information the user requests. Use when:
+- User asks about recent events, news, or updates (BG3 patches, real world, anything)
+- User explicitly asks to "find", "search", "look up", or "check" something
+- The question requires up-to-date information you may not have
+- User asks about any topic outside of BG3 that benefits from a web search
+Use a clear, specific search query. For BG3 questions include "Baldur's Gate 3" in the query.`,
   input_schema: {
     type: 'object',
     properties: {
