@@ -3,6 +3,12 @@ import { CHAT_STORAGE_KEY, MAX_HISTORY_MESSAGES } from '../data/aiPrompt'
 
 const tg = window.Telegram?.WebApp
 
+// Telegram user ID — used for server-side profile (long-term memory)
+// initDataUnsafe is unverified but fine for personal use
+function getTgUserId() {
+  return tg?.initDataUnsafe?.user?.id?.toString() || null
+}
+
 // Persist chat history via Telegram CloudStorage (if available) or localStorage
 async function saveHistory(messages) {
   // Keep last N messages but trim content to avoid hitting CloudStorage 4KB limit
@@ -109,9 +115,10 @@ export function useAIChat() {
         signal: abortRef.current.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: apiMessages,
+          messages:    apiMessages,
           romanceMode: detectRomanceMode(updated),
           intimateMode: detectIntimateMode(updated),
+          userId:      getTgUserId(),
         }),
       })
 
