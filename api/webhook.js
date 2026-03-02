@@ -152,7 +152,7 @@ const KEYBOARD_QUERIES = {
 // ─── Rate limiting (in-memory, resets on cold start) ─────────────────────────
 
 const RATE_LIMIT   = new Map()
-const MAX_PER_HOUR = 30
+const MAX_PER_HOUR = 100
 
 function checkRateLimit(userId) {
   const now     = Date.now()
