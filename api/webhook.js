@@ -10,6 +10,7 @@ import {
   buildProfileContext,
   MOOD_ADDENDUMS,
   SPANK_ADDENDUM,
+  IMAGE_PERCEPTION_ADDENDUM,
 } from '../src/ai/systemPrompt.js'
 import { routeQuery }          from '../src/ai/modelRouter.js'
 import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
@@ -129,6 +130,26 @@ async function tgSendChatAction(token, chatId) {
   })
 }
 
+// ─── Photo download helper ────────────────────────────────────────────────────
+
+async function downloadPhotoAsBase64(fileId, token) {
+  // 1. Get file path from Telegram
+  const fileRes  = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`)
+  const fileData = await fileRes.json()
+  const filePath = fileData?.result?.file_path
+  if (!filePath) throw new Error('Cannot get file path from Telegram')
+
+  // 2. Download the actual file bytes
+  const photoRes    = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`)
+  const arrayBuffer = await photoRes.arrayBuffer()
+
+  // 3. Convert to base64
+  const bytes  = new Uint8Array(arrayBuffer)
+  let   binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
+}
+
 // ─── Persistent keyboard ──────────────────────────────────────────────────────
 
 const MAIN_KEYBOARD = {
@@ -190,7 +211,7 @@ function detectSpank(t)    { const l = t.toLowerCase(); return SPANK_KW   .some(
 
 // ─── System prompt builder ────────────────────────────────────────────────────
 
-function buildSystemPrompt(profile, session, spankMode) {
+function buildSystemPrompt(profile, session, spankMode, hasPhoto = false) {
   const mood = profile?.mood || 'neutral'
 
   let sp = MINTHARA_SYSTEM_PROMPT
@@ -204,6 +225,8 @@ function buildSystemPrompt(profile, session, spankMode) {
   } else if (session.romanceMode || mood === 'in_heat') {
     sp += ROMANCE_MODE_ADDENDUM
   }
+
+  if (hasPhoto) sp += IMAGE_PERCEPTION_ADDENDUM
 
   return sp
 }
@@ -258,16 +281,17 @@ export default async function handler(req) {
     return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
   }
 
-  // ── Only handle text messages ────────────────────────────────────────────────
+  // ── Only handle text or photo messages ──────────────────────────────────────
 
   const message = update.message
-  if (!message?.text) {
+  if (!message?.text && !message?.photo) {
     return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
   }
 
-  const userId = message.from.id
-  const chatId = message.chat.id
-  let   text   = message.text.trim()
+  const userId   = message.from.id
+  const chatId   = message.chat.id
+  const hasPhoto = Boolean(message.photo?.length)
+  let   text     = (message.text || message.caption || '').trim()
 
   // ── /start ───────────────────────────────────────────────────────────────────
 
@@ -357,17 +381,40 @@ export default async function handler(req) {
 
   // ── Build system prompt ───────────────────────────────────────────────────────
 
-  const route = routeQuery(text)
-  let systemPrompt = buildSystemPrompt(profile, session, spankMode)
+  const route = routeQuery(text || 'посмотри на изображение')
+  let systemPrompt = buildSystemPrompt(profile, session, spankMode, hasPhoto)
   if (route.knowledgeKeys.length > 0) {
     systemPrompt += GUIDE_CONTEXT_PREFIX
     systemPrompt += getKnowledgeContext(route.knowledgeKeys)
   }
 
+  // ── Build user content (text or text+image) ───────────────────────────────────
+
+  let userContent
+  if (hasPhoto) {
+    try {
+      const fileId = message.photo[message.photo.length - 1].file_id
+      const base64 = await downloadPhotoAsBase64(fileId, botToken)
+      userContent = [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+        { type: 'text',  text: text || 'Что ты видишь?' },
+      ]
+    } catch (err) {
+      console.error('Photo download error:', err)
+      userContent = text || 'Посмотри на это изображение'
+    }
+  } else {
+    userContent = text
+  }
+
   // ── Call AI ───────────────────────────────────────────────────────────────────
 
-  session.messages.push({ role: 'user', content: text })
+  // Save text-only to session history (photos too heavy to store in Redis)
+  session.messages.push({ role: 'user', content: hasPhoto ? (text || '[фото]') : text })
+
+  // Build API messages: use text history + replace last message with actual content
   const apiMessages = session.messages.map(m => ({ role: m.role, content: m.content }))
+  apiMessages[apiMessages.length - 1].content = userContent
 
   try {
     const { text: reply, usedSearch } = await callAI(anthropicKey, route.model, systemPrompt, apiMessages)
