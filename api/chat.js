@@ -9,6 +9,7 @@ import {
   buildProfileContext,
   MOOD_ADDENDUMS,
   SPANK_ADDENDUM,
+  IMAGE_PERCEPTION_ADDENDUM,
 } from '../src/ai/systemPrompt.js'
 import { routeQuery }          from '../src/ai/modelRouter.js'
 import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
@@ -109,7 +110,8 @@ export default async function handler(req) {
     })
   }
 
-  const { messages, romanceMode, intimateMode, userId } = body
+  const { messages, romanceMode, intimateMode, userId, imageBase64, imageMediaType } = body
+  const hasImage = Boolean(imageBase64)
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return new Response(JSON.stringify({ error: 'messages array required' }), {
@@ -157,6 +159,8 @@ export default async function handler(req) {
     systemPrompt += ROMANCE_MODE_ADDENDUM
   }
 
+  if (hasImage) systemPrompt += IMAGE_PERCEPTION_ADDENDUM
+
   if (route.knowledgeKeys.length > 0) {
     systemPrompt += GUIDE_CONTEXT_PREFIX
     systemPrompt += getKnowledgeContext(route.knowledgeKeys)
@@ -165,6 +169,16 @@ export default async function handler(req) {
   // ── Strip extra fields — Anthropic only needs role + content ─────────────────
 
   const apiMessages = messages.map(m => ({ role: m.role, content: m.content }))
+
+  // ── Inject image into last user message if present ────────────────────────────
+
+  if (hasImage && apiMessages.length > 0) {
+    const last = apiMessages[apiMessages.length - 1]
+    last.content = [
+      { type: 'image', source: { type: 'base64', media_type: imageMediaType || 'image/jpeg', data: imageBase64 } },
+      { type: 'text',  text: last.content || 'Что ты видишь?' },
+    ]
+  }
 
   try {
     const { text, usedSearch, searchQuery } = await callAI(apiKey, route.model, systemPrompt, apiMessages)

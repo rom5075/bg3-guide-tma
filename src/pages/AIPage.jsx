@@ -3,6 +3,33 @@ import { useAIChat } from '../hooks/useAIChat'
 import { QUICK_QUESTIONS } from '../data/aiPrompt'
 import { haptic } from '../telegram'
 
+// ─── Image compression (Canvas API, no deps) ──────────────────────────────────
+
+function compressImage(file) {
+  return new Promise(resolve => {
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const img = new Image()
+      img.onload = () => {
+        const MAX = 800
+        let { width, height } = img
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round(height * MAX / width); width = MAX }
+          else { width = Math.round(width * MAX / height); height = MAX }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        const previewUrl = canvas.toDataURL('image/jpeg', 0.5)
+        const base64    = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+        resolve({ base64, previewUrl, mediaType: 'image/jpeg' })
+      }
+      img.src = ev.target.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
 // ─── Mood config ──────────────────────────────────────────────────────────────
 
 const MOOD_CONFIG = {
@@ -179,8 +206,17 @@ function MessageBubble({ msg }) {
           borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
           backdropFilter: 'blur(4px)',
         }}>
+          {msg.imagePreview && (
+            <img
+              src={msg.imagePreview}
+              alt="фото"
+              style={{ maxWidth: 200, borderRadius: 8, marginBottom: msg.content && msg.content !== '📷' ? 6 : 2, display: 'block' }}
+            />
+          )}
           {isUser
-            ? <p style={{ fontSize: 14, color: '#e8dcc8', margin: 0, lineHeight: 1.55 }}>{msg.content}</p>
+            ? (msg.content && msg.content !== '📷'
+                ? <p style={{ fontSize: 14, color: '#e8dcc8', margin: 0, lineHeight: 1.55 }}>{msg.content}</p>
+                : null)
             : renderMarkdown(msg.content)
           }
           <div style={{ fontSize: 9.5, color: '#4a3a3a', marginTop: 5, textAlign: 'right', fontFamily: 'Cinzel,serif' }}>
@@ -311,9 +347,11 @@ function WelcomeScreen({ onSelect }) {
 
 export default function AIPage() {
   const { messages, loading, error, historyLoaded, mood, totalMessages, sendMessage, clearHistory, stopGeneration } = useAIChat()
-  const [input, setInput] = useState('')
+  const [input, setInput]           = useState('')
+  const [pendingImage, setPendingImage] = useState(null) // { base64, previewUrl, mediaType }
   const messagesEndRef = useRef(null)
-  const inputRef = useRef(null)
+  const inputRef       = useRef(null)
+  const fileInputRef   = useRef(null)
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -321,11 +359,21 @@ export default function AIPage() {
     }
   }, [messages, loading])
 
+  async function handleFileChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    haptic('light')
+    const compressed = await compressImage(file)
+    setPendingImage(compressed)
+  }
+
   function handleSend(text) {
     const q = text ?? input
-    if (!q.trim()) return
+    if (!q.trim() && !pendingImage) return
     setInput('')
-    sendMessage(q)
+    sendMessage(q ?? '', pendingImage?.base64 || null, pendingImage?.mediaType || 'image/jpeg')
+    setPendingImage(null)
     inputRef.current?.blur()
   }
 
@@ -486,67 +534,118 @@ export default function AIPage() {
         left: 0, right: 0,
         background: 'var(--bg-dark)',
         borderTop: '1px solid var(--border-gold)',
-        padding: '8px 12px',
-        display: 'flex', gap: 8, alignItems: 'flex-end',
         zIndex: 90,
       }}>
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKey}
-          placeholder="Говори, смертный…"
-          rows={1}
-          style={{
-            flex: 1,
-            background: 'rgba(8,5,12,.8)',
-            border: '1px solid rgba(42,25,28,.7)',
-            borderRadius: 10,
-            padding: '9px 12px',
-            fontFamily: 'Cormorant Garamond, Georgia, serif',
-            fontSize: 14,
-            color: 'var(--text-primary)',
-            outline: 'none',
-            resize: 'none',
-            lineHeight: 1.4,
-            maxHeight: 100,
-            overflowY: 'auto',
-          }}
-          onInput={e => {
-            e.target.style.height = 'auto'
-            e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px'
-          }}
-        />
-        {loading ? (
+        {/* Image preview chip */}
+        {pendingImage && (
+          <div style={{
+            padding: '6px 12px 0',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <img
+              src={pendingImage.previewUrl}
+              alt="pending"
+              style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid rgba(196,32,64,.3)', flexShrink: 0 }}
+            />
+            <span style={{ fontSize: 12, color: '#7a6a5a', fontFamily: 'Cinzel,serif', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              фото прикреплено
+            </span>
+            <button
+              onClick={() => { haptic('light'); setPendingImage(null) }}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: '#7a4a4a', fontSize: 18, lineHeight: 1, padding: '2px 4px',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >✕</button>
+          </div>
+        )}
+
+        {/* Input row */}
+        <div style={{ padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+
+          {/* 📎 button */}
           <button
-            onClick={() => { haptic('medium'); stopGeneration() }}
+            onClick={() => { haptic('light'); fileInputRef.current?.click() }}
+            disabled={loading}
             style={{
               width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-              background: 'rgba(196,32,64,.15)',
-              border: '1px solid rgba(196,32,64,.4)',
-              cursor: 'pointer', fontSize: 16,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >⏹</button>
-        ) : (
-          <button
-            onClick={() => { haptic('medium'); handleSend() }}
-            disabled={!input.trim()}
-            style={{
-              width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-              background: input.trim() ? 'rgba(196,32,64,.25)' : 'rgba(42,25,28,.4)',
-              border: `1px solid ${input.trim() ? 'rgba(196,32,64,.5)' : 'rgba(42,25,28,.5)'}`,
-              cursor: input.trim() ? 'pointer' : 'default',
+              background: pendingImage ? 'rgba(196,32,64,.15)' : 'rgba(42,25,28,.35)',
+              border: `1px solid ${pendingImage ? 'rgba(196,32,64,.4)' : 'rgba(42,25,28,.6)'}`,
+              cursor: loading ? 'default' : 'pointer',
               fontSize: 18,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
+              WebkitTapHighlightColor: 'transparent',
               transition: 'all .15s',
             }}
-          >🩸</button>
-        )}
+          >📎</button>
+
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder="Говори, смертный…"
+            rows={1}
+            style={{
+              flex: 1,
+              background: 'rgba(8,5,12,.8)',
+              border: '1px solid rgba(42,25,28,.7)',
+              borderRadius: 10,
+              padding: '9px 12px',
+              fontFamily: 'Cormorant Garamond, Georgia, serif',
+              fontSize: 14,
+              color: 'var(--text-primary)',
+              outline: 'none',
+              resize: 'none',
+              lineHeight: 1.4,
+              maxHeight: 100,
+              overflowY: 'auto',
+            }}
+            onInput={e => {
+              e.target.style.height = 'auto'
+              e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px'
+            }}
+          />
+          {loading ? (
+            <button
+              onClick={() => { haptic('medium'); stopGeneration() }}
+              style={{
+                width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                background: 'rgba(196,32,64,.15)',
+                border: '1px solid rgba(196,32,64,.4)',
+                cursor: 'pointer', fontSize: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >⏹</button>
+          ) : (
+            <button
+              onClick={() => { haptic('medium'); handleSend() }}
+              disabled={!input.trim() && !pendingImage}
+              style={{
+                width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                background: (input.trim() || pendingImage) ? 'rgba(196,32,64,.25)' : 'rgba(42,25,28,.4)',
+                border: `1px solid ${(input.trim() || pendingImage) ? 'rgba(196,32,64,.5)' : 'rgba(42,25,28,.5)'}`,
+                cursor: (input.trim() || pendingImage) ? 'pointer' : 'default',
+                fontSize: 18,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all .15s',
+              }}
+            >🩸</button>
+          )}
+        </div>
       </div>
 
       {/* Spacer for fixed input */}
-      <div style={{ height: 66 }} />
+      <div style={{ height: pendingImage ? 116 : 66 }} />
     </>
   )
 }

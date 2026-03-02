@@ -12,8 +12,9 @@ function getTgUserId() {
 // Persist chat history via Telegram CloudStorage (if available) or localStorage
 async function saveHistory(messages) {
   // Keep last N messages but trim content to avoid hitting CloudStorage 4KB limit
+  // imagePreview is excluded — base64 would blow up the 4KB limit
   const trimmed = messages.slice(-MAX_HISTORY_MESSAGES).map(m => ({
-    ...m,
+    id: m.id, role: m.role, ts: m.ts,
     content: m.content.length > 300 ? m.content.slice(0, 300) + '…' : m.content,
   }))
   const data = JSON.stringify(trimmed)
@@ -89,13 +90,14 @@ export function useAIChat() {
     })
   }, [])
 
-  const sendMessage = useCallback(async (userText) => {
-    if (!userText.trim() || loading) return
+  const sendMessage = useCallback(async (userText, imageBase64 = null, mediaType = 'image/jpeg') => {
+    if (!userText.trim() && !imageBase64 || loading) return
 
     const userMsg = {
       id: Date.now(),
       role: 'user',
-      content: userText.trim(),
+      content: userText.trim() || '📷',
+      imagePreview: imageBase64 ? `data:${mediaType};base64,${imageBase64}` : null,
       ts: new Date().toISOString(),
     }
 
@@ -117,10 +119,12 @@ export function useAIChat() {
         signal: abortRef.current.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages:    apiMessages,
-          romanceMode: detectRomanceMode(updated),
-          intimateMode: detectIntimateMode(updated),
-          userId:      getTgUserId(),
+          messages:       apiMessages,
+          romanceMode:    detectRomanceMode(updated),
+          intimateMode:   detectIntimateMode(updated),
+          userId:         getTgUserId(),
+          imageBase64:    imageBase64 || undefined,
+          imageMediaType: imageBase64 ? mediaType : undefined,
         }),
       })
 
