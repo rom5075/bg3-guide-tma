@@ -70,6 +70,8 @@ export function useAIChat() {
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState(null)
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [mood, setMood]                   = useState('neutral')
+  const [totalMessages, setTotalMessages] = useState(0)
   const abortRef = useRef(null)
 
   // Load history on mount
@@ -129,6 +131,8 @@ export function useAIChat() {
 
       const data = await res.json()
       const assistantText = data.text || ''
+      if (data.mood)          setMood(data.mood)
+      if (data.totalMessages) setTotalMessages(data.totalMessages)
 
       const assistantMsg = {
         id: Date.now() + 1,
@@ -164,5 +168,5 @@ export function useAIChat() {
     setLoading(false)
   }
 
-  return { messages, loading, error, historyLoaded, sendMessage, clearHistory, stopGeneration }
+  return { messages, loading, error, historyLoaded, mood, totalMessages, sendMessage, clearHistory, stopGeneration }
 }

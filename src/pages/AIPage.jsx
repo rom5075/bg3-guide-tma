@@ -3,7 +3,19 @@ import { useAIChat } from '../hooks/useAIChat'
 import { QUICK_QUESTIONS } from '../data/aiPrompt'
 import { haptic } from '../telegram'
 
-// Minimal markdown → JSX renderer (bold, italic, code, lists)
+// ─── Mood config ──────────────────────────────────────────────────────────────
+
+const MOOD_CONFIG = {
+  neutral:    { color: '#4a7a4a', label: 'Нейтральна' },
+  warm:       { color: '#c9a84c', label: 'Тепло'      },
+  cold:       { color: '#6ab8d4', label: 'Холодна'    },
+  irritated:  { color: '#c42040', label: 'Раздражена' },
+  possessive: { color: '#8a3060', label: 'Властна'    },
+  in_heat:    { color: '#c42040', label: 'Желает'     },
+}
+
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+
 function renderMarkdown(text) {
   const lines = text.split('\n')
   const elements = []
@@ -11,11 +23,8 @@ function renderMarkdown(text) {
 
   while (i < lines.length) {
     const line = lines[i]
-
-    // Empty line
     if (!line.trim()) { i++; continue }
 
-    // Bullet list
     if (/^[-*•] /.test(line)) {
       const listItems = []
       while (i < lines.length && /^[-*•] /.test(lines[i])) {
@@ -34,7 +43,6 @@ function renderMarkdown(text) {
       continue
     }
 
-    // Numbered list
     if (/^\d+\. /.test(line)) {
       const listItems = []
       while (i < lines.length && /^\d+\. /.test(lines[i])) {
@@ -53,7 +61,6 @@ function renderMarkdown(text) {
       continue
     }
 
-    // Heading
     if (/^### /.test(line)) {
       elements.push(<div key={i} style={{ fontFamily: 'Cinzel,serif', fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', color: '#c9a84c', margin: '10px 0 4px' }}>{line.replace(/^### /, '')}</div>)
       i++; continue
@@ -63,7 +70,6 @@ function renderMarkdown(text) {
       i++; continue
     }
 
-    // Code block
     if (line.startsWith('```')) {
       const codeLines = []
       i++
@@ -81,7 +87,6 @@ function renderMarkdown(text) {
       i++; continue
     }
 
-    // Normal paragraph
     elements.push(
       <p key={i} style={{ fontSize: 14, color: '#c8b89a', lineHeight: 1.65, margin: '4px 0', fontFamily: 'Cormorant Garamond, Georgia, serif' }}>
         {inlineMarkdown(line)}
@@ -89,139 +94,171 @@ function renderMarkdown(text) {
     )
     i++
   }
-
   return elements
 }
 
 function inlineMarkdown(text) {
-  // Split by bold/italic/code/🚨
   const parts = []
   const regex = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|🚨[^\n]*)/g
-  let last = 0
-  let m
+  let last = 0, m
   while ((m = regex.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index))
     const token = m[0]
-    if (token.startsWith('**')) {
+    if (token.startsWith('**'))
       parts.push(<strong key={m.index} style={{ color: '#e8c97a', fontWeight: 600 }}>{token.slice(2, -2)}</strong>)
-    } else if (token.startsWith('*')) {
+    else if (token.startsWith('*'))
       parts.push(<em key={m.index} style={{ color: '#c8b89a', fontStyle: 'italic' }}>{token.slice(1, -1)}</em>)
-    } else if (token.startsWith('`')) {
+    else if (token.startsWith('`'))
       parts.push(<code key={m.index} style={{ background: 'rgba(0,0,0,.4)', padding: '1px 5px', borderRadius: 3, fontSize: 12, color: '#6ab8d4' }}>{token.slice(1, -1)}</code>)
-    } else if (token.startsWith('🚨')) {
+    else if (token.startsWith('🚨'))
       parts.push(<span key={m.index} style={{ color: '#e03060', fontWeight: 600 }}>{token}</span>)
-    }
     last = m.index + token.length
   }
   if (last < text.length) parts.push(text.slice(last))
   return parts.length ? parts : text
 }
 
+// ─── Avatar ───────────────────────────────────────────────────────────────────
+
+function MintharaAvatar({ size = 32 }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      overflow: 'hidden',
+      border: `1px solid rgba(201,168,76,${size > 40 ? '.4' : '.25'})`,
+      background: 'linear-gradient(145deg, #0d1a3e, #2a0d4a, #5a0f20)',
+      boxShadow: size > 40 ? '0 0 14px rgba(196,32,64,.25)' : 'none',
+    }}>
+      <img
+        src="/minthara.jpg"
+        alt="Minthara"
+        style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top right' }}
+        onError={e => { e.target.style.display = 'none' }}
+      />
+    </div>
+  )
+}
+
+// ─── MessageBubble ────────────────────────────────────────────────────────────
+
 function MessageBubble({ msg }) {
   const isUser = msg.role === 'user'
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: isUser ? 'flex-end' : 'flex-start',
-      marginBottom: 10,
-    }}>
+    <div style={{ marginBottom: 10 }}>
+      {/* Sender label — only for Minthara */}
       {!isUser && (
         <div style={{
-          width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-          background: 'linear-gradient(135deg, #7a1225, #3e1460)',
-          border: '1px solid rgba(196,32,64,.4)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 16, marginRight: 8, alignSelf: 'flex-end',
-        }}>🩸</div>
+          fontFamily: 'Cinzel,serif',
+          fontSize: 9,
+          color: 'rgba(201,168,76,.45)',
+          letterSpacing: 1.2,
+          textTransform: 'uppercase',
+          marginLeft: 42,
+          marginBottom: 3,
+        }}>
+          Минтара
+        </div>
       )}
+
       <div style={{
-        maxWidth: '80%',
-        padding: isUser ? '9px 13px' : '10px 14px',
-        background: isUser
-          ? 'linear-gradient(135deg, rgba(196,32,64,.25), rgba(122,18,37,.2))'
-          : 'rgba(14,10,20,.85)',
-        border: `1px solid ${isUser ? 'rgba(196,32,64,.3)' : 'rgba(42,25,28,.7)'}`,
-        borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        justifyContent: isUser ? 'flex-end' : 'flex-start',
       }}>
-        {isUser
-          ? <p style={{ fontSize: 14, color: '#e8dcc8', margin: 0, lineHeight: 1.55 }}>{msg.content}</p>
-          : renderMarkdown(msg.content)
-        }
-        <div style={{ fontSize: 9.5, color: '#4a3a3a', marginTop: 5, textAlign: 'right', fontFamily: 'Cinzel,serif' }}>
-          {new Date(msg.ts).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
+        {!isUser && (
+          <div style={{ marginRight: 8, alignSelf: 'flex-end' }}>
+            <MintharaAvatar size={30} />
+          </div>
+        )}
+        <div style={{
+          maxWidth: '80%',
+          padding: isUser ? '9px 13px' : '10px 14px',
+          background: isUser
+            ? 'linear-gradient(135deg, rgba(196,32,64,.25), rgba(122,18,37,.2))'
+            : 'rgba(14,10,20,.85)',
+          border: `1px solid ${isUser ? 'rgba(196,32,64,.3)' : 'rgba(42,25,28,.7)'}`,
+          borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+          backdropFilter: 'blur(4px)',
+        }}>
+          {isUser
+            ? <p style={{ fontSize: 14, color: '#e8dcc8', margin: 0, lineHeight: 1.55 }}>{msg.content}</p>
+            : renderMarkdown(msg.content)
+          }
+          <div style={{ fontSize: 9.5, color: '#4a3a3a', marginTop: 5, textAlign: 'right', fontFamily: 'Cinzel,serif' }}>
+            {new Date(msg.ts).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
+// ─── Typing indicator ─────────────────────────────────────────────────────────
+
 function TypingIndicator() {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 10 }}>
+    <div style={{ marginBottom: 10 }}>
       <div style={{
-        width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-        background: 'linear-gradient(135deg, #7a1225, #3e1460)',
-        border: '1px solid rgba(196,32,64,.4)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 16,
-      }}>🩸</div>
-      <div style={{
-        padding: '12px 16px',
-        background: 'rgba(14,10,20,.85)',
-        border: '1px solid rgba(42,25,28,.7)',
-        borderRadius: '14px 14px 14px 4px',
-        display: 'flex', gap: 5, alignItems: 'center',
+        fontFamily: 'Cinzel,serif', fontSize: 9,
+        color: 'rgba(201,168,76,.45)', letterSpacing: 1.2,
+        textTransform: 'uppercase', marginLeft: 42, marginBottom: 3,
       }}>
-        {[0,1,2].map(i => (
-          <div key={i} style={{
-            width: 7, height: 7, borderRadius: '50%',
-            background: '#c42040',
-            animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
-          }} />
-        ))}
+        Минтара
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+        <MintharaAvatar size={30} />
+        <div style={{
+          padding: '12px 16px',
+          background: 'rgba(14,10,20,.85)',
+          border: '1px solid rgba(42,25,28,.7)',
+          borderRadius: '14px 14px 14px 4px',
+          display: 'flex', gap: 5, alignItems: 'center',
+        }}>
+          {[0,1,2].map(i => (
+            <div key={i} style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: '#c42040',
+              animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+            }} />
+          ))}
+        </div>
       </div>
     </div>
   )
 }
 
-function QuickQuestionsPanel({ onSelect }) {
+// ─── Welcome screen ───────────────────────────────────────────────────────────
+
+function WelcomeScreen({ onSelect }) {
   const [openCat, setOpenCat] = useState(null)
 
   return (
     <div style={{ marginBottom: 16 }}>
-      {/* Intro */}
+      {/* Portrait card */}
       <div style={{
-        padding: '14px 16px', marginBottom: 12,
-        background: 'linear-gradient(135deg, rgba(122,18,37,.15), rgba(62,10,80,.1))',
-        border: '1px solid rgba(196,32,64,.2)',
-        borderRadius: 10,
-        display: 'flex', gap: 12, alignItems: 'flex-start',
+        padding: '18px 16px',
+        marginBottom: 14,
+        background: 'linear-gradient(135deg, rgba(122,18,37,.12), rgba(62,10,80,.08))',
+        border: '1px solid rgba(196,32,64,.18)',
+        borderRadius: 12,
+        display: 'flex', gap: 14, alignItems: 'center',
       }}>
-        <span style={{ fontSize: 30, flexShrink: 0 }}>🩸</span>
-        <div>
-          <div style={{ fontFamily: 'Cinzel,serif', fontSize: 12, color: '#e8c97a', marginBottom: 4, letterSpacing: 1 }}>
-            Советник Dark Urge
+        <MintharaAvatar size={56} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: 'Cinzel,serif', fontSize: 13, color: '#e8c97a', marginBottom: 2, letterSpacing: 0.5 }}>
+            Минтара Баэнр
           </div>
-          <div style={{ fontSize: 13, color: '#a89878', lineHeight: 1.55 }}>
-            ИИ-советник по Dark Urge пути BG3. Задай любой вопрос о прохождении, романе с Минтарой, билдах или механиках.
+          <div style={{ fontFamily: 'Cinzel,serif', fontSize: 9, color: '#6a5a5a', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>
+            Главный военачальник · Дом Баэнр
+          </div>
+          <div style={{ fontSize: 13.5, color: '#a08060', lineHeight: 1.6, fontFamily: 'Cormorant Garamond, Georgia, serif', fontStyle: 'italic' }}>
+            "Ты нашёл меня. Интересно...
+            <br />Чего ты хочешь?"
           </div>
         </div>
       </div>
 
-      {/* API key notice */}
-      <div style={{
-        padding: '9px 12px', marginBottom: 12,
-        background: 'rgba(106,184,212,.07)',
-        border: '1px solid rgba(106,184,212,.2)',
-        borderRadius: 6,
-        fontSize: 12, color: '#6ab8d4', lineHeight: 1.5,
-      }}>
-        ℹ️ Для работы нужен <strong style={{ color: '#6ab8d4' }}>Anthropic API ключ</strong> в переменной окружения на сервере. <a href="https://console.anthropic.com" target="_blank" rel="noopener" style={{ color: '#6ab8d4' }}>console.anthropic.com</a>
-      </div>
-
-      {/* Category tabs */}
-      <div className="section-label">Быстрые вопросы</div>
+      {/* Quick questions */}
+      <div className="section-label">Начать разговор</div>
       <div className="scroll-x" style={{ gap: 8, marginBottom: 12 }}>
         {QUICK_QUESTIONS.map(cat => (
           <button
@@ -233,14 +270,13 @@ function QuickQuestionsPanel({ onSelect }) {
               border: `1px solid ${openCat === cat.category ? cat.color + '55' : 'rgba(42,25,28,.7)'}`,
               borderRadius: 20,
               fontFamily: 'Cinzel,serif', fontSize: 9.5, letterSpacing: 1,
-              color: openCat === cat.category ? cat.color : '#8a7a6a',
+              color: openCat === cat.category ? cat.color : '#7a6a5a',
               cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
             }}
           >{cat.icon} {cat.category}</button>
         ))}
       </div>
 
-      {/* Questions for open category */}
       {openCat && (() => {
         const cat = QUICK_QUESTIONS.find(c => c.category === openCat)
         return (
@@ -271,8 +307,10 @@ function QuickQuestionsPanel({ onSelect }) {
   )
 }
 
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function AIPage() {
-  const { messages, loading, error, historyLoaded, sendMessage, clearHistory, stopGeneration } = useAIChat()
+  const { messages, loading, error, historyLoaded, mood, totalMessages, sendMessage, clearHistory, stopGeneration } = useAIChat()
   const [input, setInput] = useState('')
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
@@ -299,36 +337,78 @@ export default function AIPage() {
   }
 
   const showWelcome = historyLoaded && messages.length === 0
+  const moodCfg = MOOD_CONFIG[mood] || MOOD_CONFIG.neutral
+
+  // Detect active modes from last few messages
+  const recentUser = messages.filter(m => m.role === 'user').slice(-3).map(m => m.content.toLowerCase()).join(' ')
+  const ROMANCE_KW = ['люблю', 'любовь', 'поцелу', 'обними', 'ночь', 'постель', 'флирт', 'хочу тебя']
+  const INTIMATE_KW = ['займёмся', 'займемся', 'переспи', 'в постель', 'секс', 'интим', 'трахн', 'желание']
+  const isRomance  = ROMANCE_KW.some(kw => recentUser.includes(kw))
+  const isIntimate = INTIMATE_KW.some(kw => recentUser.includes(kw))
 
   return (
     <>
-      <div className="page-header">
-        <h1>ИИ Советник</h1>
-        <p>Claude — Dark Urge эксперт</p>
-      </div>
+      {/* ── Custom header (replaces .page-header) ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '0 0 14px',
+        marginBottom: 2,
+      }}>
+        <MintharaAvatar size={46} />
 
-      {/* Clear history button */}
-      {messages.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: 'Cinzel,serif', fontSize: 14, color: '#e8c97a', letterSpacing: 0.4, lineHeight: 1.2 }}>
+            Минтара Баэнр
+          </div>
+          <div style={{ fontFamily: 'Cinzel,serif', fontSize: 9, color: '#5a4a4a', letterSpacing: 0.8, marginTop: 2, textTransform: 'uppercase' }}>
+            Главный военачальник · Дом Баэнр
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <div style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: moodCfg.color,
+              flexShrink: 0,
+              boxShadow: `0 0 6px ${moodCfg.color}88`,
+              animation: mood === 'in_heat' ? 'pulse 1.2s ease-in-out infinite' : 'none',
+            }} />
+            <span style={{ fontFamily: 'Cinzel,serif', fontSize: 9.5, color: moodCfg.color, opacity: 0.85 }}>
+              {moodCfg.label}
+            </span>
+            {totalMessages > 0 && (
+              <>
+                <span style={{ color: '#3a2a3a', fontSize: 9 }}>·</span>
+                <span style={{ fontFamily: 'Cinzel,serif', fontSize: 9.5, color: '#4a3a4a' }}>
+                  {totalMessages} {totalMessages === 1 ? 'сообщение' : totalMessages < 5 ? 'сообщения' : 'сообщений'}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Clear history button */}
+        {messages.length > 0 && (
           <button
             onClick={() => { haptic('light'); clearHistory() }}
             style={{
-              background: 'none', border: '1px solid rgba(42,25,28,.6)',
-              borderRadius: 5, padding: '5px 12px',
+              background: 'none', border: '1px solid rgba(42,25,28,.5)',
+              borderRadius: 6, padding: '6px 10px',
               fontFamily: 'Cinzel,serif', fontSize: 8.5, letterSpacing: 1.5,
-              textTransform: 'uppercase', color: '#6a5a5a',
+              textTransform: 'uppercase', color: '#5a4a4a',
               cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              flexShrink: 0,
             }}
-          >🗑 Очистить историю</button>
-        </div>
-      )}
+          >🗑</button>
+        )}
+      </div>
 
-      {/* Welcome / quick questions */}
+      {/* ── Welcome / quick questions ── */}
       {showWelcome && (
-        <QuickQuestionsPanel onSelect={q => handleSend(q)} />
+        <WelcomeScreen onSelect={q => handleSend(q)} />
       )}
 
-      {/* Messages */}
+      {/* ── Messages ── */}
       {messages.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           {messages.map(msg => <MessageBubble key={msg.id} msg={msg} />)}
@@ -345,7 +425,27 @@ export default function AIPage() {
         </div>
       )}
 
-      {/* Quick questions below chat if has messages */}
+      {/* ── Mode badges ── */}
+      {messages.length > 0 && (isRomance || isIntimate) && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {isRomance && (
+            <div style={{
+              padding: '4px 10px', borderRadius: 10,
+              background: 'rgba(196,32,64,.1)', border: '1px solid rgba(196,32,64,.22)',
+              fontFamily: 'Cinzel,serif', fontSize: 8.5, color: '#c42040', letterSpacing: 0.5,
+            }}>♥ Романтика</div>
+          )}
+          {isIntimate && (
+            <div style={{
+              padding: '4px 10px', borderRadius: 10,
+              background: 'rgba(138,32,80,.1)', border: '1px solid rgba(138,32,80,.25)',
+              fontFamily: 'Cinzel,serif', fontSize: 8.5, color: '#8a2050', letterSpacing: 0.5,
+            }}>🔥 Близость</div>
+          )}
+        </div>
+      )}
+
+      {/* ── Quick chips below chat ── */}
       {messages.length > 0 && !loading && (
         <div style={{ marginBottom: 14 }}>
           <div className="scroll-x" style={{ gap: 7 }}>
@@ -360,7 +460,7 @@ export default function AIPage() {
                     border: `1px solid ${cat.color}33`,
                     borderRadius: 14,
                     fontFamily: 'Cinzel,serif', fontSize: 9, letterSpacing: .5,
-                    color: '#8a7a6a', cursor: 'pointer',
+                    color: '#7a6a5a', cursor: 'pointer',
                     WebkitTapHighlightColor: 'transparent',
                     maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}
@@ -371,7 +471,7 @@ export default function AIPage() {
         </div>
       )}
 
-      {/* Pulse animation */}
+      {/* ── Animations ── */}
       <style>{`
         @keyframes pulse {
           0%, 60%, 100% { transform: scale(1); opacity: 0.5; }
@@ -379,7 +479,7 @@ export default function AIPage() {
         }
       `}</style>
 
-      {/* Input area — fixed at bottom above nav */}
+      {/* ── Input area ── */}
       <div style={{
         position: 'fixed',
         bottom: 'calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px))',
@@ -395,7 +495,7 @@ export default function AIPage() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKey}
-          placeholder="Спроси что угодно о Dark Urge BG3…"
+          placeholder="Говори, смертный…"
           rows={1}
           style={{
             flex: 1,

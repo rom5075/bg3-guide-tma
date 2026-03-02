@@ -179,7 +179,12 @@ export default async function handler(req) {
     }
 
     return new Response(
-      JSON.stringify({ text, model: route.model, queryType: route.queryType, usedSearch, searchQuery }),
+      JSON.stringify({
+        text, model: route.model, queryType: route.queryType, usedSearch, searchQuery,
+        mood:          profile.mood          || 'neutral',
+        moodScore:     profile.moodScore     || 0,
+        totalMessages: profile.totalMessages || 0,
+      }),
       { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
     )
   } catch (err) {
