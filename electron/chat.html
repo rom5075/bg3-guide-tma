@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css">
+  <title>Минтара</title>
+</head>
+<body>
+<div class="overlay-container">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────────── -->
+  <div class="header">
+    <img
+      class="header-avatar"
+      src="../public/minthara.jpg"
+      alt="M"
+      onerror="this.style.display='none'; document.querySelector('.header-fallback').style.display='flex'"
+    >
+    <div class="header-fallback">⚔️</div>
+
+    <div class="header-info">
+      <div class="header-name">Минтара Баэнр</div>
+      <div class="header-sub">Главный военачальник · Дом Баэнр</div>
+      <div class="status">
+        <span class="mood-dot" id="mood-dot"></span>
+        <span class="mood-label" id="mood-label">Нейтральна</span>
+      </div>
+    </div>
+
+    <button class="close-btn" onclick="window.overlay.hideChat()" title="Скрыть (Alt+M)">✕</button>
+  </div>
+
+  <!-- ── Messages ───────────────────────────────────────────────────────────── -->
+  <div class="messages" id="messages">
+    <div class="empty-state" id="empty-state">
+      <div class="empty-quote">"Ты нашёл меня. Интересно…<br>Чего ты хочешь?"</div>
+    </div>
+  </div>
+
+  <!-- ── Quick Chips ────────────────────────────────────────────────────────── -->
+  <div class="chips" id="chips"></div>
+
+  <!-- ── Input ──────────────────────────────────────────────────────────────── -->
+  <div class="input-area">
+    <textarea
+      id="msg-input"
+      placeholder="Говори, смертный…"
+      rows="1"
+      onkeydown="handleKey(event)"
+      oninput="handleInput(this)"
+    ></textarea>
+    <button id="send-btn" onclick="handleSend()" title="Отправить">🩸</button>
+  </div>
+
+</div>
+
+<script src="chat.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "appId": "com.bg3.minthara-overlay",
+  "productName": "Minthara Overlay",
+  "copyright": "BG3 Guide — Minthara AI Companion",
+
+  "directories": {
+    "output": "../dist-overlay"
+  },
+
+  "files": [
+    "**/*",
+    "!node_modules",
+    "../public/minthara.jpg"
+  ],
+
+  "extraResources": [
+    {
+      "from": "../public/minthara.jpg",
+      "to":   "public/minthara.jpg"
+    }
+  ],
+
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch":   ["x64"]
+      }
+    ]
+  },
+
+  "nsis": {
+    "oneClick":          true,
+    "perMachine":        false,
+    "deleteAppDataOnUninstall": true
+  }
+}

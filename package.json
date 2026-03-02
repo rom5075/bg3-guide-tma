@@ -3,20 +3,25 @@
   "version": "1.0.0",
   "description": "BG3 Ultimate Guide — Telegram Mini App",
   "type": "module",
+  "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev":            "vite",
+    "build":          "vite build",
+    "preview":        "vite preview",
+    "overlay":        "electron electron/main.js",
+    "overlay:build":  "electron-builder --win --config electron/builder.json"
   },
   "dependencies": {
+    "@twa-dev/sdk": "^7.10.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@twa-dev/sdk": "^7.10.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3",
     "vite": "^5.4.8"
   }
 }
