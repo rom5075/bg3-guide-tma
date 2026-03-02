@@ -17,14 +17,18 @@ Return JSON with these fields:
   "intimate_summary": <"1-2 sentence description of the scene" | null>,
   "name": <user's name if they mentioned it | null>,
   "act": <1|2|3 if user mentioned BG3 act | null>,
-  "new_facts": <array of up to 3 new facts about the user | []>
+  "new_facts": <array of up to 3 new facts about the user | []>,
+  "key_memory_worthy": <true if this exchange contains a significant milestone: first flirt/intimacy, conflict resolved, emotional breakthrough, notable confession | false>,
+  "key_memory_type": <"romance"|"intimate"|"conflict"|"milestone"|null>,
+  "key_memory_summary": <"brief milestone description in Russian, Minthara's POV, max 120 chars" | null>
 }
 
 Rules:
 - mood_delta: +1 if conversation got warmer/flirtier, -1 if user was cold/rude/absent
 - suggested_mood: only set if the shift is obvious (e.g. user explicitly flirts → "warm", user proposes sex → "in_heat")
 - intimate_occurred: true ONLY if an actual intimate/sexual scene was described in the reply
-- intimate_summary: write in Russian, from Minthara's perspective, max 2 sentences`
+- intimate_summary: write in Russian, from Minthara's perspective, max 2 sentences
+- key_memory_worthy: true only for genuinely significant moments, not every exchange`
 }
 
 export async function extractAndEvaluate(apiKey, userMsg, assistantMsg, existingProfile) {
@@ -39,7 +43,7 @@ export async function extractAndEvaluate(apiKey, userMsg, assistantMsg, existing
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
+        max_tokens: 450,
         system: EXTRACTOR_SYSTEM,
         messages: [{ role: 'user', content: extractorPrompt(userMsg, assistantMsg) }],
       }),
@@ -89,12 +93,25 @@ export async function extractAndEvaluate(apiKey, userMsg, assistantMsg, existing
       p.intimateCount = (p.intimateCount || 0) + 1
       p.mood = 'possessive'   // satisfied but possessive
       p.moodScore = 3
-      if (ext.intimate_summary) {
-        p.lastIntimate = {
-          date: now,
-          summary: String(ext.intimate_summary).slice(0, 250),
-        }
+      const intimateSummary = ext.intimate_summary
+        ? String(ext.intimate_summary).slice(0, 250)
+        : ''
+      if (intimateSummary) {
+        p.lastIntimate = { date: now, summary: intimateSummary }
+        // Build intimate log (keep last 10 entries)
+        const entry = { date: now, ordinal: p.intimateCount, summary: intimateSummary }
+        p.intimateLog = [...(p.intimateLog || []), entry].slice(-10)
       }
+    }
+
+    // Key memories (keep last 15 significant moments)
+    if (ext.key_memory_worthy && ext.key_memory_summary) {
+      const mem = {
+        date: now,
+        type: ext.key_memory_type || 'milestone',
+        summary: String(ext.key_memory_summary).slice(0, 150),
+      }
+      p.keyMemories = [...(p.keyMemories || []), mem].slice(-15)
     }
 
     // Accumulate facts (keep newest 10)

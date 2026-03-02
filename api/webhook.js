@@ -18,7 +18,7 @@ import { extractAndEvaluate }  from '../src/ai/profileExtractor.js'
 
 export const config = { runtime: 'edge' }
 
-const MAX_HISTORY = 16
+const MAX_HISTORY = 50
 const SESSION_TTL = 60 * 60 * 24 * 7    // 7 days
 const PROFILE_TTL = 60 * 60 * 24 * 365  // 1 year
 

@@ -213,6 +213,17 @@ export function buildProfileContext(profile) {
   if (profile.lastIntimate) {
     lines.push(`- Последняя ночь (${profile.lastIntimate.date}): ${profile.lastIntimate.summary}`)
   }
+  if (profile.intimateLog?.length > 1) {
+    const older = profile.intimateLog.slice(0, -1).slice(-3)
+    const formatted = older.map(e => `Ночь ${e.ordinal} (${e.date}): ${e.summary}`).join(' | ')
+    lines.push(`- Предыдущие ночи: ${formatted}`)
+  }
+
+  if (profile.keyMemories?.length > 0) {
+    const recent = profile.keyMemories.slice(-4)
+    const formatted = recent.map(m => `[${m.date}] ${m.summary}`).join(' | ')
+    lines.push(`- Важные моменты: ${formatted}`)
+  }
 
   if (profile.knownFacts?.length > 0) {
     lines.push(`- Известно о нём: ${profile.knownFacts.slice(-5).join('; ')}`)

@@ -51,4 +51,4 @@ export const QUICK_QUESTIONS = [
 
 // Storage key for chat history in Telegram CloudStorage
 export const CHAT_STORAGE_KEY = 'bg3_ai_chat_v1'
-export const MAX_HISTORY_MESSAGES = 20 // keep context window small
+export const MAX_HISTORY_MESSAGES = 50 // keep context window small
