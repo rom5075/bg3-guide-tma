@@ -1,10 +1,14 @@
 // ─── Minthara Overlay — Electron Main Process ─────────────────────────────────
-const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron')
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
 const cfg  = require('./config.js')
 
 let iconWin = null
 let chatWin = null
+let tray    = null
+
+// 16×16 красный квадрат — fallback если minthara.jpg не загрузился
+const FALLBACK_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAFklEQVQ4jWP8z8BQDwAEgAF/QualIQAAAABJRU5ErkJggg=='
 
 // ─── Window creation ──────────────────────────────────────────────────────────
 
@@ -75,6 +79,30 @@ app.whenReady().then(() => {
   if (!registered) {
     console.warn(`[overlay] Could not register hotkey: ${cfg.HOTKEY}`)
   }
+
+  // ── System tray icon with right-click menu ───────────────────────────────────
+  // В собранном .exe ресурсы лежат в process.resourcesPath, в dev — рядом с проектом
+  const avatarPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'public', 'minthara.jpg')
+    : path.join(__dirname, '..', 'public', 'minthara.jpg')
+
+  let trayImg = nativeImage.createFromPath(avatarPath)
+  if (!trayImg.isEmpty()) trayImg = trayImg.resize({ width: 16, height: 16 })
+
+  try {
+    tray = new Tray(trayImg.isEmpty() ? nativeImage.createFromDataURL(FALLBACK_ICON) : trayImg)
+  } catch {
+    tray = new Tray(nativeImage.createFromDataURL(FALLBACK_ICON))
+  }
+  tray.setToolTip('Minthara Overlay')
+
+  const trayMenu = Menu.buildFromTemplate([
+    { label: 'Показать / скрыть чат', click: toggleChat },
+    { type: 'separator' },
+    { label: 'Выйти', click: () => { tray.destroy(); app.exit(0) } },
+  ])
+  tray.setContextMenu(trayMenu)
+  tray.on('double-click', toggleChat)
 })
 
 app.on('will-quit', () => {

@@ -4,18 +4,17 @@
   "copyright": "BG3 Guide — Minthara AI Companion",
 
   "directories": {
-    "output": "../dist-overlay"
+    "output": "dist-overlay"
   },
 
   "files": [
     "**/*",
-    "!node_modules",
-    "../public/minthara.jpg"
+    "!node_modules"
   ],
 
   "extraResources": [
     {
-      "from": "../public/minthara.jpg",
+      "from": "public/minthara.jpg",
       "to":   "public/minthara.jpg"
     }
   ],
@@ -23,15 +22,9 @@
   "win": {
     "target": [
       {
-        "target": "nsis",
+        "target": "dir",
         "arch":   ["x64"]
       }
     ]
-  },
-
-  "nsis": {
-    "oneClick":          true,
-    "perMachine":        false,
-    "deleteAppDataOnUninstall": true
   }
 }

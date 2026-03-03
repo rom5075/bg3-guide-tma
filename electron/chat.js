@@ -78,9 +78,23 @@ function updateMood(newMood) {
 
 function renderChips() {
   const container = document.getElementById('chips')
+
+  // data-text + addEventListener — избегаем проблем с кавычками в onclick=""
   container.innerHTML = QUICK_CHIPS.map(c =>
-    `<button class="chip" onclick="handleSend(${JSON.stringify(c.text)})">${c.icon} ${c.label}</button>`
+    `<button class="chip" data-text="${c.text.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">${c.icon} ${c.label}</button>`
   ).join('')
+
+  container.querySelectorAll('.chip').forEach(btn => {
+    btn.addEventListener('click', () => handleSend(btn.dataset.text))
+  })
+
+  // Колёсико мыши → горизонтальный скролл
+  container.addEventListener('wheel', e => {
+    if (e.deltaY !== 0) {
+      e.preventDefault()
+      container.scrollLeft += e.deltaY * 0.8
+    }
+  }, { passive: false })
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────────
