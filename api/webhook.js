@@ -9,7 +9,9 @@ import {
   GUIDE_CONTEXT_PREFIX,
   buildProfileContext,
   MOOD_ADDENDUMS,
-  SPANK_ADDENDUM,
+  SPANK_PHRASES,
+  SPANK_GROUP_SUFFIX,
+  TRIAL_ADDENDUM,
   IMAGE_PERCEPTION_ADDENDUM,
 } from '../src/ai/systemPrompt.js'
 import { routeQuery }          from '../src/ai/modelRouter.js'
@@ -214,14 +216,20 @@ const SPANK_KW = [
   'шлепн', 'хлопн', 'по попе', 'по ягодиц', 'по заднице',
   'spank', 'slap your', 'slap on',
 ]
+const TRIAL_KW = ['испытание', 'испытани']
+const TRIAL_CUSTOMS_KW = [
+  'обычай', 'обычаям', 'традиц', 'нашем мире', 'нашего мира',
+  'нашим миром', 'учись', 'научись', 'принять наш',
+]
 
 function detectRomance(t)  { const l = t.toLowerCase(); return ROMANCE_KW .some(kw => l.includes(kw)) }
 function detectIntimate(t) { const l = t.toLowerCase(); return INTIMATE_KW.some(kw => l.includes(kw)) }
 function detectSpank(t)    { const l = t.toLowerCase(); return SPANK_KW   .some(kw => l.includes(kw)) }
+function detectTrial(t)    { const l = t.toLowerCase(); return TRIAL_KW.some(kw => l.includes(kw)) && TRIAL_CUSTOMS_KW.some(kw => l.includes(kw)) }
 
 // ─── System prompt builder ────────────────────────────────────────────────────
 
-function buildSystemPrompt(profile, session, spankMode, hasPhoto = false) {
+function buildSystemPrompt(profile, session, spankMode, hasPhoto = false, trialMode = false) {
   const mood = profile?.mood || 'neutral'
 
   let sp = MINTHARA_SYSTEM_PROMPT
@@ -229,7 +237,10 @@ function buildSystemPrompt(profile, session, spankMode, hasPhoto = false) {
   sp += MOOD_ADDENDUMS[mood] || ''
 
   if (spankMode) {
-    sp += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM + SPANK_ADDENDUM
+    const phrase = SPANK_PHRASES[Math.floor(Math.random() * SPANK_PHRASES.length)]
+    sp += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM + phrase + SPANK_GROUP_SUFFIX
+  } else if (trialMode) {
+    sp += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM + TRIAL_ADDENDUM
   } else if (session.intimateMode) {
     sp += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM
   } else if (session.romanceMode || mood === 'in_heat') {
@@ -387,12 +398,13 @@ export default async function handler(req) {
   if (detectRomance(text))  session.romanceMode  = true
   if (detectIntimate(text)) session.intimateMode = true
   const spankMode = detectSpank(text)
-  if (spankMode)            session.intimateMode = true
+  const trialMode = detectTrial(text)
+  if (spankMode) session.intimateMode = true
 
   // ── Build system prompt ───────────────────────────────────────────────────────
 
   const route = routeQuery(text || 'посмотри на изображение')
-  let systemPrompt = buildSystemPrompt(profile, session, spankMode, hasPhoto)
+  let systemPrompt = buildSystemPrompt(profile, session, spankMode, hasPhoto, trialMode)
   if (route.knowledgeKeys.length > 0) {
     systemPrompt += GUIDE_CONTEXT_PREFIX
     systemPrompt += getKnowledgeContext(route.knowledgeKeys)
