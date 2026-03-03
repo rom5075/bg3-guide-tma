@@ -19,6 +19,16 @@ import { extractAndEvaluate }  from '../src/ai/profileExtractor.js'
 
 export const config = { runtime: 'edge' }
 
+// ─── Mood display prefix ──────────────────────────────────────────────────────
+const MOOD_DISPLAY = {
+  neutral:    { emoji: '🩶', label: 'Нейтральна' },
+  warm:       { emoji: '💛', label: 'Тепло'      },
+  cold:       { emoji: '🩵', label: 'Холодна'    },
+  irritated:  { emoji: '❤️‍🔥', label: 'Раздражена' },
+  possessive: { emoji: '💜', label: 'Властна'    },
+  in_heat:    { emoji: '🔥', label: 'Желает'     },
+}
+
 const MAX_HISTORY = 50
 const SESSION_TTL = 60 * 60 * 24 * 7    // 7 days
 const PROFILE_TTL = 60 * 60 * 24 * 365  // 1 year
@@ -422,9 +432,11 @@ export default async function handler(req) {
     session.messages.push({ role: 'assistant', content: reply })
     await saveSession(userId, session)
 
-    const finalReply = usedSearch
+    const moodInfo   = MOOD_DISPLAY[profile.mood] || MOOD_DISPLAY['neutral']
+    const moodPrefix = `_${moodInfo.emoji} ${moodInfo.label}_\n\n`
+    const finalReply = moodPrefix + (usedSearch
       ? reply + '\n\n_🕵️ Тени нашептали свежие сведения..._'
-      : reply
+      : reply)
 
     // ── Send response ────────────────────────────────────────────────────────────
     try {
