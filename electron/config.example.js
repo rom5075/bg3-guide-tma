@@ -10,7 +10,6 @@ module.exports = {
   USER_ID: 'ВАШ_TG_USER_ID',
 
   // URL твоего Vercel-деплоя (тот же что в Mini App и Telegram-боте).
-  // Пример: 'https://bg3-guide-tma.vercel.app/api/chat'
   API_URL: 'https://ВАШ_ПРОЕКТ.vercel.app/api/chat',
 
   // Горячая клавиша для показа/скрытия чата.
