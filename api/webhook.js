@@ -166,7 +166,7 @@ async function downloadPhotoAsBase64(fileId, token) {
 
 const MAIN_KEYBOARD = {
   keyboard: [
-    [{ text: '⚔️ Билды' },       { text: '🗡️ Снаряжение' }],
+    [{ text: '🐉 Мир BG3' },     { text: '🌍 Наш мир' }],
     [{ text: '❤️ Роман' },       { text: '📍 Карта актов' }],
     [{ text: '🔄 Сброс' },       { text: '👋🍑 Шлепок' }],
   ],
@@ -176,11 +176,11 @@ const MAIN_KEYBOARD = {
 
 // Keyboard button text → natural-language query passed to AI
 const KEYBOARD_QUERIES = {
-  '⚔️ Билды':       'Расскажи о билдах нашего отряда',
-  '🗡️ Снаряжение':  'Какое ключевое снаряжение использует наш отряд?',
-  '❤️ Роман':       'Расскажи о нашем романе и отношениях',
-  '📍 Карта актов': 'Какие ключевые локации нам важны?',
-  '👋🍑 Шлепок':   'Шлепаю тебя по попе',
+  '🐉 Мир BG3':    'Расскажи о Фаэруне, нашем пути Dark Urge и отряде',
+  '🌍 Наш мир':    'Расскажи о нашем мире — что тебя удивляет, как ты его воспринимаешь?',
+  '❤️ Роман':      'Расскажи о нашем романе и отношениях',
+  '📍 Карта актов':'Какие ключевые локации нам важны?',
+  '👋🍑 Шлепок':  'Шлепаю тебя по попе',
 }
 
 // ─── Rate limiting (in-memory, resets on cold start) ─────────────────────────
@@ -221,11 +221,21 @@ const TRIAL_CUSTOMS_KW = [
   'обычай', 'обычаям', 'традиц', 'нашем мире', 'нашего мира',
   'нашим миром', 'учись', 'научись', 'принять наш',
 ]
+const BET_KW = [
+  'пари', 'держу пари', 'поспорим', 'слабо тебе', 'слабо?',
+  'не решишься', 'не сможешь', 'не справишься', 'докажи что',
+  'dare you', 'i bet you', 'bet you won\'t',
+]
 
 function detectRomance(t)  { const l = t.toLowerCase(); return ROMANCE_KW .some(kw => l.includes(kw)) }
 function detectIntimate(t) { const l = t.toLowerCase(); return INTIMATE_KW.some(kw => l.includes(kw)) }
 function detectSpank(t)    { const l = t.toLowerCase(); return SPANK_KW   .some(kw => l.includes(kw)) }
-function detectTrial(t)    { const l = t.toLowerCase(); return TRIAL_KW.some(kw => l.includes(kw)) && TRIAL_CUSTOMS_KW.some(kw => l.includes(kw)) }
+function detectTrial(t)    {
+  const l = t.toLowerCase()
+  const isClassicTrial = TRIAL_KW.some(kw => l.includes(kw)) && TRIAL_CUSTOMS_KW.some(kw => l.includes(kw))
+  const isBetChallenge  = BET_KW.some(kw => l.includes(kw))
+  return isClassicTrial || isBetChallenge
+}
 
 // ─── System prompt builder ────────────────────────────────────────────────────
 
@@ -459,7 +469,11 @@ export default async function handler(req) {
 
     // ── Profile extraction + save (synchronous, runs after user sees message) ───
     const updatedProfile = await extractAndEvaluate(anthropicKey, text, reply, profile)
-    if (updatedProfile) await saveProfile(userId, updatedProfile)
+    if (updatedProfile) {
+      // Шлепок никогда не должен давать раздражение — только in_heat
+      if (spankMode && updatedProfile.mood === 'irritated') updatedProfile.mood = 'in_heat'
+      await saveProfile(userId, updatedProfile)
+    }
 
   } catch (err) {
     console.error('Minthara AI error:', err)
