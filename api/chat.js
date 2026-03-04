@@ -8,7 +8,8 @@ import {
   GUIDE_CONTEXT_PREFIX,
   buildProfileContext,
   MOOD_ADDENDUMS,
-  SPANK_ADDENDUM,
+  SPANK_PHRASES,
+  SPANK_GROUP_SUFFIX,
   IMAGE_PERCEPTION_ADDENDUM,
 } from '../src/ai/systemPrompt.js'
 import { routeQuery }          from '../src/ai/modelRouter.js'
@@ -154,7 +155,7 @@ export default async function handler(req) {
 
   if (spankMode || intimateMode) {
     systemPrompt += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM
-    if (spankMode) systemPrompt += SPANK_ADDENDUM
+    if (spankMode) systemPrompt += SPANK_PHRASES[Math.floor(Math.random() * SPANK_PHRASES.length)] + SPANK_GROUP_SUFFIX
   } else if (romanceMode || mood === 'in_heat') {
     systemPrompt += ROMANCE_MODE_ADDENDUM
   }
