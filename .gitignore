@@ -4,3 +4,5 @@ dist-overlay/
 .env
 .DS_Store
 electron/config.js
+SERVER_INFO.md
+CLAUDE.md

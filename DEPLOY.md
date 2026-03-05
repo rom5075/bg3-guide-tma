@@ -91,7 +91,7 @@ git push -u origin main
 
 Через ~30-60 секунд получишь URL:
 ```
-https://bg3-guide-tma.vercel.app
+https://YOUR_PROJECT.vercel.app
 ```
 
 > ✅ Теперь каждый `git push` = автоматический редеплой.
@@ -118,7 +118,7 @@ https://bg3-guide-tma.vercel.app
 ```
 → Выбери бота → **Bot Settings** → **Menu Button** → **Configure menu button**
 
-- URL кнопки: `https://bg3-guide-tma.vercel.app`
+- URL кнопки: `https://YOUR_PROJECT.vercel.app`
 - Текст: `🗡 Открыть Гайд`
 
 **Вариант B — отдельное Mini App приложение:**
@@ -133,7 +133,7 @@ https://bg3-guide-tma.vercel.app
 | Title | BG3 Ultimate Guide |
 | Description | Гайд: романы, билды, карта, лор, арты |
 | Photo | Картинка 640×360px |
-| Web App URL | https://bg3-guide-tma.vercel.app |
+| Web App URL | https://YOUR_PROJECT.vercel.app |
 
 Получишь ссылку вида `https://t.me/bg3_ultimateguide_bot/app`
 
