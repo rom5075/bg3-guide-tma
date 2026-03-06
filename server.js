@@ -1,5 +1,5 @@
 import express from 'express'
-import webhookHandler from './api/webhook.js'
+import webhookHandler from './bot/webhook.js'  // VPS: uses SQLite (not api/webhook.js which is Vercel-only)
 import chatHandler   from './api/chat.js'
 
 const app = express()

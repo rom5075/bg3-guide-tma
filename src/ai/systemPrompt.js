@@ -207,33 +207,69 @@ export const GUIDE_CONTEXT_PREFIX = `
 `;
 
 // ── Long-term memory: what Minthara knows about the user ─────────────────────
+//
+// dbData (optional) — VPS path (SQLite):
+//   { memories: [{memory_type, summary, created_at}],
+//     nights:   [{ordinal, summary, happened_at}],
+//     facts:    [string] }
+// When dbData is null — Vercel/Redis path (profile arrays, original limits).
 
-export function buildProfileContext(profile) {
+export function buildProfileContext(profile, dbData = null) {
   if (!profile || Object.keys(profile).length === 0) return ''
   const lines = []
 
   if (profile.name)          lines.push(`- Имя: ${profile.name}`)
   if (profile.act)           lines.push(`- Акт в игре: ${profile.act}`)
   if (profile.totalMessages) lines.push(`- Сообщений вместе: ${profile.totalMessages}`)
-
   if (profile.intimateCount > 0) lines.push(`- Ночей вместе: ${profile.intimateCount}`)
-  if (profile.lastIntimate) {
-    lines.push(`- Последняя ночь (${profile.lastIntimate.date}): ${profile.lastIntimate.summary}`)
-  }
-  if (profile.intimateLog?.length > 1) {
-    const older = profile.intimateLog.slice(0, -1).slice(-3)
-    const formatted = older.map(e => `Ночь ${e.ordinal} (${e.date}): ${e.summary}`).join(' | ')
-    lines.push(`- Предыдущие ночи: ${formatted}`)
-  }
 
-  if (profile.keyMemories?.length > 0) {
-    const recent = profile.keyMemories.slice(-4)
-    const formatted = recent.map(m => `[${m.date}] ${m.summary}`).join(' | ')
-    lines.push(`- Важные моменты: ${formatted}`)
-  }
+  if (dbData) {
+    // ── VPS path: use SQLite arrays with higher limits ─────────────────────────
 
-  if (profile.knownFacts?.length > 0) {
-    lines.push(`- Известно о нём: ${profile.knownFacts.slice(-5).join('; ')}`)
+    // Intimate nights (up to 5 total in prompt)
+    if (dbData.nights?.length > 0) {
+      const last = dbData.nights[dbData.nights.length - 1]
+      const lastDate = last.happened_at?.slice(0, 10) || '?'
+      lines.push(`- Последняя ночь (${lastDate}): ${last.summary}`)
+      if (dbData.nights.length > 1) {
+        const older = dbData.nights.slice(0, -1).slice(-4)
+        const fmt = older.map(e => `Ночь ${e.ordinal ?? '?'} (${e.happened_at?.slice(0, 10) || '?'}): ${e.summary}`).join(' | ')
+        lines.push(`- Предыдущие ночи: ${fmt}`)
+      }
+    }
+
+    // Memories (10 vs 4 in Vercel)
+    if (dbData.memories?.length > 0) {
+      const fmt = dbData.memories.map(m => `[${m.created_at?.slice(0, 10) || '?'}] ${m.summary}`).join(' | ')
+      lines.push(`- Важные моменты: ${fmt}`)
+    }
+
+    // Facts (8 vs 5 in Vercel)
+    if (dbData.facts?.length > 0) {
+      lines.push(`- Известно о нём: ${dbData.facts.join('; ')}`)
+    }
+
+  } else {
+    // ── Vercel/Redis path: original profile arrays ─────────────────────────────
+
+    if (profile.lastIntimate) {
+      lines.push(`- Последняя ночь (${profile.lastIntimate.date}): ${profile.lastIntimate.summary}`)
+    }
+    if (profile.intimateLog?.length > 1) {
+      const older = profile.intimateLog.slice(0, -1).slice(-3)
+      const fmt = older.map(e => `Ночь ${e.ordinal} (${e.date}): ${e.summary}`).join(' | ')
+      lines.push(`- Предыдущие ночи: ${fmt}`)
+    }
+
+    if (profile.keyMemories?.length > 0) {
+      const recent = profile.keyMemories.slice(-4)
+      const fmt = recent.map(m => `[${m.date}] ${m.summary}`).join(' | ')
+      lines.push(`- Важные моменты: ${fmt}`)
+    }
+
+    if (profile.knownFacts?.length > 0) {
+      lines.push(`- Известно о нём: ${profile.knownFacts.slice(-5).join('; ')}`)
+    }
   }
 
   if (profile.lastSeen) {

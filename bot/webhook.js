@@ -1,0 +1,515 @@
+// Telegram Bot webhook handler — VPS / SQLite version
+// Runs on Node.js + Express (NOT Vercel Edge Runtime)
+// SQLite stores all messages + profile permanently (no TTL, no limits)
+
+import {
+  MINTHARA_SYSTEM_PROMPT,
+  ROMANCE_MODE_ADDENDUM,
+  INTIMATE_MODE_ADDENDUM,
+  GUIDE_CONTEXT_PREFIX,
+  buildProfileContext,
+  MOOD_ADDENDUMS,
+  SPANK_PHRASES,
+  SPANK_GROUP_SUFFIX,
+  TRIAL_ADDENDUM,
+  IMAGE_PERCEPTION_ADDENDUM,
+} from '../src/ai/systemPrompt.js'
+import { routeQuery }          from '../src/ai/modelRouter.js'
+import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
+import { callAI }              from '../src/ai/callAI.js'
+import { extractAndEvaluate }  from '../src/ai/profileExtractor.js'
+import * as storage            from '../src/db/sqlite.js'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const MAX_HISTORY = 50
+
+const MOOD_DISPLAY = {
+  neutral:    { emoji: '🩶', label: 'Нейтральна' },
+  warm:       { emoji: '💛', label: 'Тепло'      },
+  cold:       { emoji: '🩵', label: 'Холодна'    },
+  irritated:  { emoji: '❤️‍🔥', label: 'Раздражена' },
+  possessive: { emoji: '💜', label: 'Властна'    },
+  in_heat:    { emoji: '🔥', label: 'Желает'     },
+}
+
+// ─── Profile normalizer (SQLite row → app object) ─────────────────────────────
+
+function normalizeProfile(row) {
+  if (!row) return {}
+  return {
+    name:          row.name           || null,
+    act:           row.act            || 1,
+    mood:          row.mood           || 'neutral',
+    moodScore:     row.mood_score     || 0,
+    intimateCount: row.intimate_count || 0,
+    totalMessages: row.total_messages || 0,
+    romanceMode:   Boolean(row.romance_mode),
+    intimateMode:  Boolean(row.intimate_mode),
+    firstSeen:     row.first_seen     || null,
+    lastSeen:      row.last_seen      || null,
+  }
+}
+
+// ─── Telegram API helpers ─────────────────────────────────────────────────────
+
+async function tgSend(token, chatId, text, replyMarkup = null) {
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      chat_id:    chatId,
+      text,
+      parse_mode: 'Markdown',
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    }),
+  })
+}
+
+async function tgSendPlain(token, chatId, text, replyMarkup = null) {
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      chat_id: chatId,
+      text,
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    }),
+  })
+}
+
+async function tgSendChatAction(token, chatId) {
+  await fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ chat_id: chatId, action: 'typing' }),
+  })
+}
+
+// ─── Photo download ───────────────────────────────────────────────────────────
+
+async function downloadPhotoAsBase64(fileId, token) {
+  const fileRes  = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`)
+  const fileData = await fileRes.json()
+  const filePath = fileData?.result?.file_path
+  if (!filePath) throw new Error('Cannot get file path from Telegram')
+
+  const photoRes    = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`)
+  const arrayBuffer = await photoRes.arrayBuffer()
+
+  const bytes  = new Uint8Array(arrayBuffer)
+  let   binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
+}
+
+// ─── Persistent keyboard ──────────────────────────────────────────────────────
+
+const MAIN_KEYBOARD = {
+  keyboard: [
+    [{ text: '🐉 Мир BG3' },     { text: '🌍 Наш мир' }],
+    [{ text: '❤️ Роман' },       { text: '🎲 Держу пари' }],
+    [{ text: '🔄 Сброс' },       { text: '👋🍑 Шлепок' }],
+  ],
+  resize_keyboard: true,
+  is_persistent:   true,
+}
+
+const KEYBOARD_QUERIES = {
+  '🐉 Мир BG3':    'Расскажи о Фаэруне, нашем пути Dark Urge и отряде',
+  '🌍 Наш мир':    'Расскажи о нашем мире — что тебя удивляет, как ты его воспринимаешь?',
+  '❤️ Роман':      'Расскажи о нашем романе и отношениях',
+  '🎲 Держу пари': 'Держу пари — ты не решишься выполнить всё что я скажу',
+  '👋🍑 Шлепок':  'Шлепаю тебя по попе',
+}
+
+// ─── Rate limiting (in-memory, resets on pm2 restart) ────────────────────────
+
+const RATE_LIMIT   = new Map()
+const MAX_PER_HOUR = 100
+
+function checkRateLimit(userId) {
+  const now     = Date.now()
+  const hourAgo = now - 3_600_000
+  const stamps  = (RATE_LIMIT.get(userId) || []).filter(t => t > hourAgo)
+  if (stamps.length >= MAX_PER_HOUR) return false
+  stamps.push(now)
+  RATE_LIMIT.set(userId, stamps)
+  return true
+}
+
+// ─── Keyword detection ────────────────────────────────────────────────────────
+
+const ROMANCE_KW = [
+  'люблю', 'любовь', 'поцелу', 'обними', 'ночь', 'постель',
+  'вместе', 'красив', 'флирт', 'приди', 'хочу тебя',
+  'kiss', 'love', 'hold me', 'beautiful',
+]
+const INTIMATE_KW = [
+  'займёмся', 'займемся', 'переспи', 'переспать', 'в постель', 'в кровать',
+  'ляжем', 'ляг со мной', 'хочу тебя', 'трахн', 'секс', 'интим',
+  'раздень', 'разденься', 'обнажи', 'возьми меня', 'будь моей', 'будь моим',
+  'плотские', 'утех', 'desire', 'fuck', 'bed with me', 'make love',
+  'sleep with', 'take me', 'undress',
+]
+const SPANK_KW = [
+  'шлепн', 'хлопн', 'по попе', 'по ягодиц', 'по заднице',
+  'spank', 'slap your', 'slap on',
+]
+const TRIAL_KW = ['испытание', 'испытани']
+const TRIAL_CUSTOMS_KW = [
+  'обычай', 'обычаям', 'традиц', 'нашем мире', 'нашего мира',
+  'нашим миром', 'учись', 'научись', 'принять наш',
+]
+const BET_KW = [
+  'пари', 'держу пари', 'поспорим', 'слабо тебе', 'слабо?',
+  'не решишься', 'не сможешь', 'не справишься', 'докажи что',
+  'dare you', 'i bet you', "bet you won't",
+]
+
+function detectRomance(t)  { const l = t.toLowerCase(); return ROMANCE_KW .some(kw => l.includes(kw)) }
+function detectIntimate(t) { const l = t.toLowerCase(); return INTIMATE_KW.some(kw => l.includes(kw)) }
+function detectSpank(t)    { const l = t.toLowerCase(); return SPANK_KW   .some(kw => l.includes(kw)) }
+function detectTrial(t)    {
+  const l = t.toLowerCase()
+  return (TRIAL_KW.some(kw => l.includes(kw)) && TRIAL_CUSTOMS_KW.some(kw => l.includes(kw)))
+      || BET_KW.some(kw => l.includes(kw))
+}
+
+// ─── System prompt builder ────────────────────────────────────────────────────
+
+/**
+ * @param {object} profile   - normalized profile object
+ * @param {object} session   - { messages, romanceMode, intimateMode }
+ * @param {boolean} spankMode
+ * @param {object} dbData    - { memories[], nights[], facts[] } from SQLite
+ * @param {boolean} hasPhoto
+ * @param {boolean} trialMode
+ */
+function buildSystemPrompt(profile, session, spankMode, dbData, hasPhoto = false, trialMode = false) {
+  const mood = profile?.mood || 'neutral'
+
+  let sp = MINTHARA_SYSTEM_PROMPT
+  sp += buildProfileContext(profile, dbData)   // ← VPS path: passes dbData
+  sp += MOOD_ADDENDUMS[mood] || ''
+
+  if (spankMode) {
+    const phrase = SPANK_PHRASES[Math.floor(Math.random() * SPANK_PHRASES.length)]
+    sp += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM + phrase + SPANK_GROUP_SUFFIX
+  } else if (trialMode) {
+    sp += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM + TRIAL_ADDENDUM
+  } else if (session.intimateMode) {
+    sp += ROMANCE_MODE_ADDENDUM + INTIMATE_MODE_ADDENDUM
+  } else if (session.romanceMode || mood === 'in_heat') {
+    sp += ROMANCE_MODE_ADDENDUM
+  }
+
+  if (hasPhoto) sp += IMAGE_PERCEPTION_ADDENDUM
+
+  return sp
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
+
+export default async function handler(req) {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ ok: true, status: 'Minthara VPS webhook active' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  const botToken     = process.env.TELEGRAM_BOT_TOKEN
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  const miniAppUrl   = process.env.MINI_APP_URL
+
+  if (!botToken || !anthropicKey) {
+    return new Response('Missing env vars', { status: 500 })
+  }
+
+  let update
+  try { update = await req.json() }
+  catch { return new Response('Bad JSON', { status: 400 }) }
+
+  // ── Callback queries (inline buttons) ───────────────────────────────────────
+
+  if (update.callback_query) {
+    const cbq    = update.callback_query
+    const userId = cbq.from.id
+    const chatId = cbq.message.chat.id
+
+    await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ callback_query_id: cbq.id }),
+    })
+
+    if (cbq.data === 'cb_reset') {
+      // Delete conversation history + reset romance/intimate flags
+      // Profile (name, mood, memories, etc.) is preserved
+      storage.deleteMessages(userId)
+      storage.resetSessionFlags(userId)
+      await tgSend(botToken, chatId, '_Чистый лист. Не разочаруй меня снова._', MAIN_KEYBOARD)
+    }
+
+    if (cbq.data === 'cb_who') {
+      await tgSend(botToken, chatId,
+        '_Я — Минтара Баэнре. Первый Дом Мензоберранзана. Паладин Мести. ' +
+        'Спрашивай о Dark Urge, билдах, снаряжении, романах — или попробуй завоевать моё расположение._',
+        MAIN_KEYBOARD
+      )
+    }
+
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // ── Only handle text or photo messages ──────────────────────────────────────
+
+  const message = update.message
+  if (!message?.text && !message?.photo) {
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  const userId   = message.from.id
+  const chatId   = message.chat.id
+  const hasPhoto = Boolean(message.photo?.length)
+  let   text     = (message.text || message.caption || '').trim()
+
+  // ── /start ───────────────────────────────────────────────────────────────────
+
+  if (text === '/start') {
+    const kb = miniAppUrl
+      ? {
+          inline_keyboard: [
+            [{ text: '📖 Открыть гайд', web_app: { url: miniAppUrl } }],
+            [{ text: '🗡️ Кто ты?', callback_data: 'cb_who' }, { text: '🔄 Сброс памяти', callback_data: 'cb_reset' }],
+          ],
+        }
+      : { inline_keyboard: [[{ text: '🗡️ Кто ты?', callback_data: 'cb_who' }, { text: '🔄 Сброс', callback_data: 'cb_reset' }]] }
+
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        chat_id:      chatId,
+        text:         '🗡️ *Минтара Баэнре*\n\n_Ты осмелился потревожить дочь дома Баэнре? Хорошо. Если пришёл за знаниями о пути Тёмного Порыва — говори. Если за пустой болтовнёй — я найду тебе применение получше._\n\n💬 Пиши мне — я отвечу',
+        parse_mode:   'Markdown',
+        reply_markup: kb,
+      }),
+    })
+    await tgSend(botToken, chatId, '_Используй кнопки ниже или пиши напрямую._', MAIN_KEYBOARD)
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // ── /reset ───────────────────────────────────────────────────────────────────
+
+  if (text === '/reset' || text === '/забыть' || text === '🔄 Сброс') {
+    storage.deleteMessages(userId)
+    storage.resetSessionFlags(userId)
+    await tgSend(botToken, chatId, '_Хм. Начинаем заново? Я помню всё — но позволю тебе притвориться._', MAIN_KEYBOARD)
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // ── /guide ───────────────────────────────────────────────────────────────────
+
+  if ((text === '/guide' || text === '📖 Гайд') && miniAppUrl) {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        chat_id:      chatId,
+        text:         '_Читай и учись, смертный._',
+        parse_mode:   'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '📖 Открыть гайд', web_app: { url: miniAppUrl } }]] },
+      }),
+    })
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // ── Translate keyboard buttons → natural-language queries ────────────────────
+
+  if (KEYBOARD_QUERIES[text]) text = KEYBOARD_QUERIES[text]
+
+  // ── Rate limit ───────────────────────────────────────────────────────────────
+
+  if (!checkRateLimit(userId)) {
+    await tgSend(botToken, chatId, '_...ты утомляешь меня. Вернись через час, смертный._', MAIN_KEYBOARD)
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // ── Load from SQLite ──────────────────────────────────────────────────────────
+
+  await tgSendChatAction(botToken, chatId)
+
+  // Profile
+  const profileRow = storage.getProfile(userId)
+  const profile    = normalizeProfile(profileRow)
+
+  // Session flags from profile
+  const session = {
+    messages:     storage.getRecentMessages(userId, MAX_HISTORY),
+    romanceMode:  profile.romanceMode,
+    intimateMode: profile.intimateMode,
+  }
+
+  // DB data for prompt — more context than Vercel version
+  const dbMemories = storage.getMemories(userId, 10)       // 10 vs 4 in Vercel
+  const dbNights   = storage.getIntimateNights(userId, 5)  // 5 vs 3
+  const dbFacts    = storage.getFacts(userId, 8)           // 8 vs 5
+  const dbData     = { memories: dbMemories, nights: dbNights, facts: dbFacts }
+
+  // Apply cold mood if inactive 3+ days
+  if (profile.lastSeen) {
+    const diffDays = Math.floor((Date.now() - new Date(profile.lastSeen).getTime()) / 86400000)
+    if (diffDays >= 3 && (!profile.mood || profile.mood === 'neutral' || profile.mood === 'warm')) {
+      profile.mood = 'cold'
+    }
+  }
+
+  // ── Detect modes ─────────────────────────────────────────────────────────────
+
+  if (detectRomance(text))  session.romanceMode  = true
+  if (detectIntimate(text)) session.intimateMode = true
+  const spankMode = detectSpank(text)
+  const trialMode = detectTrial(text)
+  if (spankMode) session.intimateMode = true
+
+  // ── Build system prompt ───────────────────────────────────────────────────────
+
+  const route = routeQuery(text || 'посмотри на изображение')
+  let systemPrompt = buildSystemPrompt(profile, session, spankMode, dbData, hasPhoto, trialMode)
+  if (route.knowledgeKeys.length > 0) {
+    systemPrompt += GUIDE_CONTEXT_PREFIX
+    systemPrompt += getKnowledgeContext(route.knowledgeKeys)
+  }
+
+  // ── Build user content (text or text+image) ───────────────────────────────────
+
+  let userContent
+  if (hasPhoto) {
+    try {
+      const fileId = message.photo[message.photo.length - 1].file_id
+      const base64 = await downloadPhotoAsBase64(fileId, botToken)
+      userContent = [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+        { type: 'text',  text: text || 'Что ты видишь?' },
+      ]
+    } catch (err) {
+      console.error('Photo download error:', err)
+      userContent = text || 'Посмотри на это изображение'
+    }
+  } else {
+    userContent = text
+  }
+
+  // ── Save user message to SQLite + build API messages ──────────────────────────
+
+  const userMsgText = hasPhoto ? (text || '[фото]') : text
+  storage.saveMessage(userId, 'user', userMsgText)
+  session.messages.push({ role: 'user', content: userMsgText })
+
+  // Replace last message with actual content (may include image)
+  const apiMessages = session.messages.map(m => ({ role: m.role, content: m.content }))
+  apiMessages[apiMessages.length - 1].content = userContent
+
+  // ── Call AI ───────────────────────────────────────────────────────────────────
+
+  try {
+    const { text: reply, usedSearch } = await callAI(anthropicKey, route.model, systemPrompt, apiMessages)
+
+    // Save assistant reply to SQLite
+    storage.saveMessage(userId, 'assistant', reply)
+
+    const moodInfo   = MOOD_DISPLAY[profile.mood] || MOOD_DISPLAY['neutral']
+    const moodPrefix = `_${moodInfo.emoji} ${moodInfo.label}_\n\n`
+    const finalReply = moodPrefix + (usedSearch
+      ? reply + '\n\n_🕵️ Тени нашептали свежие сведения..._'
+      : reply)
+
+    // ── Send response ────────────────────────────────────────────────────────────
+    try {
+      await tgSend(botToken, chatId, finalReply, MAIN_KEYBOARD)
+    } catch {
+      await tgSendPlain(botToken, chatId, reply, MAIN_KEYBOARD)
+    }
+
+    // ── Profile extraction + delta save ──────────────────────────────────────────
+    // Build synthetic profile with arrays so profileExtractor works unchanged
+    const existingMemorySummaries = new Set(dbMemories.map(m => m.summary))
+    const existingNightSummaries  = new Set(dbNights.map(n => n.summary))
+    const existingFactStrings     = new Set(dbFacts)
+
+    const syntheticProfile = {
+      ...profile,
+      keyMemories: dbMemories.map(m => ({
+        type:    m.memory_type,
+        summary: m.summary,
+        date:    m.created_at?.slice(0, 10),
+      })),
+      intimateLog: dbNights.map(n => ({
+        ordinal: n.ordinal,
+        summary: n.summary,
+        date:    n.happened_at?.slice(0, 10),
+      })),
+      knownFacts: dbFacts,
+    }
+
+    const updatedProfile = await extractAndEvaluate(anthropicKey, text, reply, syntheticProfile)
+
+    if (updatedProfile) {
+      const now = new Date().toISOString()
+
+      // Delta: find items that weren't in existing sets
+      const newMemories = (updatedProfile.keyMemories || [])
+        .filter(m => m?.summary && !existingMemorySummaries.has(m.summary))
+      const newNights = (updatedProfile.intimateLog || [])
+        .filter(n => n?.summary && !existingNightSummaries.has(n.summary))
+      const newFacts = (updatedProfile.knownFacts || [])
+        .filter(f => typeof f === 'string' && f.trim() && !existingFactStrings.has(f))
+
+      // Persist new items to SQLite
+      for (const m of newMemories)
+        storage.addMemory(userId, m.type || null, m.summary, m.date || now)
+      for (const n of newNights)
+        storage.addIntimateNight(userId, n.ordinal ?? null, n.summary, n.date || now)
+      for (const f of newFacts)
+        storage.addFact(userId, f, now)
+
+      if (newMemories.length || newNights.length || newFacts.length) {
+        console.log(`[profile] +${newMemories.length} mem, +${newNights.length} nights, +${newFacts.length} facts`)
+      }
+
+      // Spank never gives irritation
+      if (spankMode && updatedProfile.mood === 'irritated') updatedProfile.mood = 'in_heat'
+
+      // Save profile (scalar fields) — flags come from current session state
+      storage.saveProfile(userId, {
+        ...updatedProfile,
+        romanceMode:  session.romanceMode,
+        intimateMode: session.intimateMode,
+      })
+
+    } else {
+      // extractAndEvaluate returned null — still save updated flags + lastSeen
+      const now = new Date().toISOString()
+      storage.saveProfile(userId, {
+        ...profile,
+        romanceMode:   session.romanceMode,
+        intimateMode:  session.intimateMode,
+        totalMessages: (profile.totalMessages || 0) + 2,
+        lastSeen:      now,
+        firstSeen:     profile.firstSeen || now,
+      })
+    }
+
+  } catch (err) {
+    console.error('Minthara AI error:', err)
+    const fallbacks = [
+      '_...тишина. Даже я замолкаю, когда Теневое Проклятье сгущается. Попробуй снова._',
+      '_Магия Абсолюта... помехи. Повтори, смертный._',
+      '_Хм. Что-то нарушило мою связь с тобой. Говори снова._',
+    ]
+    await tgSend(botToken, chatId, fallbacks[Math.floor(Math.random() * fallbacks.length)], MAIN_KEYBOARD)
+  }
+
+  return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+}
