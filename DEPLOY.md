@@ -2,321 +2,237 @@
 
 ---
 
-## 📋 Что у тебя есть
+## 📋 Структура проекта
 
 ```
 bg3-guide-tma/
 ├── src/
 │   ├── data/          ← Весь игровой контент
-│   ├── pages/         ← 10 страниц (v2)
-│   ├── components/    ← UI компоненты + SearchOverlay
+│   ├── pages/         ← 10 страниц
+│   ├── components/    ← UI компоненты
+│   ├── ai/            ← systemPrompt.js, profileExtractor.js, callAI.js
+│   ├── db/            ← sqlite.js (БД), migrate.js (миграция Redis→SQLite)
 │   ├── styles/        ← CSS (dark + light темы)
 │   ├── ThemeContext.jsx
 │   ├── App.jsx
 │   ├── telegram.js
 │   └── main.jsx
-├── dist/              ← Готовая сборка (если уже собрано)
+├── api/
+│   ├── chat.js        ← Vercel Edge Function (ИИ-советник в Mini App)
+│   └── webhook.js     ← Vercel Edge Function (не используется, оставлен)
+├── bot/
+│   └── webhook.js     ← VPS обработчик Telegram-вебхука (SQLite)
+├── server.js          ← Express сервер для VPS
 ├── index.html
 ├── package.json
 ├── vite.config.js
-└── vercel.json
+├── vercel.json        ← SPA rewrites
+└── .github/
+    └── workflows/
+        └── deploy.yml ← GitHub Actions → автодеплой на VPS
 ```
 
-**Требования:** Node.js 18+ или 20+ LTS
+**Требования:** Node.js **22 LTS** (через nvm на VPS)
+> ⚠️ Node 24 не поддерживается — `better-sqlite3` не компилируется
 
 ---
 
-## 🚀 Деплой — шаг за шагом
+## 🏗️ Архитектура
 
-### Шаг 1 — Проверь Node.js
-
-```bash
-node --version   # нужно v18+ или v20+
-npm --version    # нужно 9+
 ```
-
-Если нет — скачай с https://nodejs.org (LTS версия).
-
----
-
-### Шаг 2 — Установи зависимости и проверь сборку
-
-```bash
-cd bg3-guide-tma
-npm install
-npm run build
-# → ✓ built in X.XXs — всё ок
-```
-
-Для проверки локально:
-```bash
-npm run dev
-# Открой http://localhost:5173
+Telegram
+  └── Bot (Minthara)
+       ├── Чат бота ──────────► VPS (server.js + bot/webhook.js)
+       │                              └── SQLite (долгосрочная память)
+       │                              └── Anthropic API (Claude)
+       │
+       └── Mini App кнопка ───► Vercel (React + Vite)
+                                      ├── /api/chat  → Anthropic API
+                                      └── SPA (10 вкладок)
 ```
 
 ---
 
-### Шаг 3 — Загрузи на GitHub
+## 🚀 Часть 1 — Mini App (Vercel)
 
-1. Зайди на https://github.com → **New repository**
-2. Название: `bg3-guide-tma`
-3. Visibility: **Public** (требование Vercel Free)
-4. Нажми **Create repository** (без README — он уже есть)
+### Шаг 1 — Загрузи на GitHub
 
 ```bash
-cd bg3-guide-tma
-
 git init
 git add .
-git commit -m "Initial commit — BG3 Ultimate Guide TMA"
-
-# Замени YOUR_USERNAME на свой GitHub ник
+git commit -m "Initial commit"
 git remote add origin https://github.com/YOUR_USERNAME/bg3-guide-tma.git
 git branch -M main
 git push -u origin main
 ```
 
----
+### Шаг 2 — Деплой на Vercel
 
-### Шаг 4 — Деплой на Vercel
+1. https://vercel.com → **New Project** → импортируй репозиторий
+2. Framework: **Vite** (авто), Build: `npm run build`, Output: `dist`
+3. **Deploy**
 
-1. Зайди на https://vercel.com → **Sign Up через GitHub**
-2. Нажми **New Project**
-3. Найди `bg3-guide-tma` → **Import**
-4. Настройки оставь дефолтными — Vercel сам определит Vite:
-   - Framework: **Vite** (авто)
-   - Build Command: `npm run build`
-   - Output Directory: `dist`
-5. Нажми **Deploy**
+После деплоя получишь URL: `https://YOUR_PROJECT.vercel.app`
 
-Через ~30-60 секунд получишь URL:
-```
-https://YOUR_PROJECT.vercel.app
-```
+> ✅ Каждый `git push` = автоматический редеплой Vercel.
 
-> ✅ Теперь каждый `git push` = автоматический редеплой.
+### Шаг 3 — Переменные окружения на Vercel
+
+**Settings → Environment Variables:**
+
+| Переменная | Значение |
+|-----------|---------|
+| `ANTHROPIC_API_KEY` | Ключ с [console.anthropic.com](https://console.anthropic.com) |
 
 ---
 
-### Шаг 5 — Создай Telegram Bot
+## 🤖 Часть 2 — Telegram Bot (VPS)
 
-1. Открой [@BotFather](https://t.me/BotFather) в Telegram
-2. `/newbot`
-3. Имя: `BG3 Ultimate Guide`
-4. Username: `bg3_ultimateguide_bot` (или любой свободный, должен кончаться на `_bot`)
-5. Сохрани **Bot Token** — он нужен для следующего шага
+### Шаг 1 — Создай бота в BotFather
 
----
+1. [@BotFather](https://t.me/BotFather) → `/newbot`
+2. Сохрани **Bot Token**
 
-### Шаг 6 — Привяжи Mini App к боту
+### Шаг 2 — Подготовь VPS
 
-**Вариант A — через кнопку меню (рекомендуется):**
+```bash
+# Установить nvm + Node 22
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+source ~/.bashrc
+nvm install 22
+nvm alias default 22
 
-В BotFather:
+# Установить PM2
+npm install -g pm2
+
+# Установить build tools (для native модулей)
+apt install build-essential python3 -y
+
+# Создать папку проекта
+mkdir -p /var/www/minthara
 ```
-/mybots
-```
-→ Выбери бота → **Bot Settings** → **Menu Button** → **Configure menu button**
 
-- URL кнопки: `https://YOUR_PROJECT.vercel.app`
+### Шаг 3 — Клонировать репозиторий на VPS
+
+```bash
+cd /var/www
+git clone https://github.com/YOUR_USERNAME/bg3-guide-tma.git minthara
+cd minthara
+npm install
+mkdir -p data
+```
+
+### Шаг 4 — Файл .env на VPS
+
+Создай `/var/www/minthara/.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+ANTHROPIC_API_KEY=...
+KV_REST_API_URL=...
+KV_REST_API_TOKEN=...
+DB_PATH=/var/www/minthara/data/minthara.db
+PORT=3000
+```
+
+### Шаг 5 — Запустить бот через PM2
+
+```bash
+cd /var/www/minthara
+pm2 start server.js --name minthara --node-args="--env-file=/var/www/minthara/.env"
+pm2 save
+pm2 logs minthara --lines 10
+# Должно показать:
+# [SQLite] DB ready: /var/www/minthara/data/minthara.db
+# Minthara bot on :3000
+```
+
+### Шаг 6 — Зарегистрировать вебхук
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=https://ТВОЙ_ДОМЕН/api/webhook"
+```
+
+> Нужен nginx или reverse proxy чтобы HTTPS → port 3000.
+
+### Шаг 7 — Привязать Mini App к боту
+
+В BotFather: `/mybots` → твой бот → **Bot Settings** → **Menu Button**
+- URL: `https://YOUR_PROJECT.vercel.app`
 - Текст: `🗡 Открыть Гайд`
 
-**Вариант B — отдельное Mini App приложение:**
+---
 
-```
-/newapp
-```
-→ Выбери бота → заполни:
+## 🔄 Автодеплой (GitHub Actions)
 
-| Поле | Значение |
-|------|----------|
-| Title | BG3 Ultimate Guide |
-| Description | Гайд: романы, билды, карта, лор, арты |
-| Photo | Картинка 640×360px |
-| Web App URL | https://YOUR_PROJECT.vercel.app |
+Файл `.github/workflows/deploy.yml` настроен на автоматический деплой при `git push` в `main`.
 
-Получишь ссылку вида `https://t.me/bg3_ultimateguide_bot/app`
+**Секреты GitHub** (Settings → Secrets → Actions):
+
+| Secret | Значение |
+|--------|---------|
+| `VPS_HOST` | IP или домен VPS |
+| `VPS_USER` | SSH пользователь (обычно `root`) |
+| `VPS_SSH_KEY` | Приватный SSH ключ |
+
+После настройки: каждый `git push main` автоматически деплоит на VPS (git pull + npm install + pm2 restart).
 
 ---
 
-### Шаг 7 — Настрой ИИ-советника (вкладка 🩸)
+## 🗄️ Миграция данных Redis → SQLite (разово)
 
-Вкладка ИИ использует Anthropic API. Без ключа чат покажет ошибку соединения.
-
-**Получи ключ:** [console.anthropic.com](https://console.anthropic.com) → API Keys → Create Key
-
-**Добавь Vercel Edge Function** — создай файл `api/chat.js` в корне проекта:
-
-```js
-export default async function handler(req) {
-  if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
-  const body = await req.json()
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(body),
-  })
-  const data = await res.json()
-  return new Response(JSON.stringify(data), {
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
-export const config = { runtime: 'edge' }
-```
-
-**Добавь переменную окружения на Vercel:**
-1. Vercel Dashboard → твой проект → **Settings** → **Environment Variables**
-2. Добавь: `ANTHROPIC_API_KEY` = `sk-ant-...`
-3. Сохрани → **Redeploy**
-
-**Обнови URL в `src/hooks/useAIChat.js`:**
-```js
-// Замени строку с fetch:
-const res = await fetch('/api/chat', {   // вместо api.anthropic.com
-```
-
-После этого запросы пойдут через твой Vercel Edge Function, ключ не светится на клиенте.
-
----
-
-### Шаг 8 — Проверка
-
-1. Найди бота в Telegram → нажми кнопку меню
-2. Mini App откроется прямо внутри Telegram
-3. Проверь все 10 вкладок: Романы / Билды / Шмот / Зелья / Отряд / Карта / Лор / Арты / ИИ / Путь
-4. Проверь поиск (🔍 в топбаре) — введи "Минтара" или "Астарион"
-5. Проверь переключатель темы (🌙/☀️ в топбаре)
-
----
-
-## 🔄 Обновление контента
+Если ранее использовался Redis (Upstash):
 
 ```bash
-# Внеси изменения в src/data/
-# Например, добавь новую локацию в src/data/locations.js
-
-git add .
-git commit -m "Update: добавил локацию Last Light Inn"
-git push
-# Vercel автоматически задеплоит через ~30 сек
+node --env-file=/var/www/minthara/.env /var/www/minthara/src/db/migrate.js
+pm2 restart minthara
 ```
 
 ---
 
-## 🧪 Тестирование Telegram-специфики локально
-
-Telegram WebApp SDK работает только внутри Telegram. Для тестирования SDK на реальном устройстве используй ngrok:
+## 🔧 Разработка локально
 
 ```bash
-# Терминал 1 — запусти dev сервер
-npm run dev
-
-# Терминал 2 — создай туннель
-npx ngrok http 5173
-# Получишь URL вида: https://xxxx.ngrok.io
-
-# В BotFather временно поменяй Web App URL на ngrok URL
+npm install
+npm run dev      # → http://localhost:5173
+npm run build    # проверить сборку
+npm run preview  # превью dist/
 ```
+
+Без Telegram SDK все фолбеки работают — приложение открывается в браузере.
 
 ---
 
-## 🌐 Переменные окружения (если нужны)
+## ✅ Чеклист перед запуском
 
-Создай `.env.local` в корне проекта:
-```env
-VITE_APP_VERSION=1.0.0
-```
+**Mini App (Vercel):**
+- [ ] `npm run build` без ошибок
+- [ ] Vercel статус: **Ready**
+- [ ] `ANTHROPIC_API_KEY` добавлен в Vercel
+- [ ] Mini App открывается в Telegram
 
-В коде: `import.meta.env.VITE_APP_VERSION`
-
-На Vercel: **Project Settings** → **Environment Variables** → добавь те же переменные.
-
----
-
-## ✅ Чеклист перед публикацией
-
-- [ ] `npm run build` проходит без ошибок
-- [ ] Приложение открывается в браузере на `localhost:5173`
-- [ ] Все 10 вкладок работают
-- [ ] Поиск находит результаты
-- [ ] Светлая тема переключается
-- [ ] ИИ-советник отвечает (нужен API ключ)
-- [ ] Код запушен на GitHub
-- [ ] Vercel задеплоил (статус: **Ready**)
-- [ ] URL открывается в браузере (не только localhost)
-- [ ] Бот создан в BotFather
-- [ ] Web App URL привязан к боту
-- [ ] Mini App открывается внутри Telegram
+**Bot (VPS):**
+- [ ] Node 22 установлен (`node -v` → v22.x.x)
+- [ ] `.env` заполнен всеми ключами
+- [ ] `pm2 status` → **online**
+- [ ] Логи показывают `[SQLite] DB ready:`
+- [ ] Вебхук зарегистрирован
+- [ ] Бот отвечает на сообщения в Telegram
 
 ---
 
 ## ❓ Частые проблемы
 
-**Белый экран в Telegram**
-- URL должен быть HTTPS (Vercel даёт автоматически)
-- Открой тот же URL в браузере телефона — должно работать
-- Проверь `vercel.json` — должны быть rewrites для SPA
-
-**`npm install` падает**
-- Проверь версию Node: `node --version` (нужно 18+)
-- Попробуй: `npm install --legacy-peer-deps`
-
-**Шрифты не загружаются**
-- Нужен интернет при первом открытии (Google Fonts CDN)
-- Шрифт Cinzel и Cormorant Garamond загружаются из `fonts.googleapis.com`
-
-**Поиск не находит что-то новое**
-- `searchIndex.js` читает данные напрямую из data-файлов — пересборка не нужна
-- Убедись что добавил данные в правильный файл и правильный массив
-
-**Вертикальный свайп закрывает Mini App**
-- Уже отключено через `tg.disableVerticalSwipes()` в `telegram.js`
-- Если не работает — требуется Telegram 9.0+ (TMA SDK v6.9+)
+| Проблема | Решение |
+|----------|---------|
+| `better-sqlite3` не компилируется | Используй Node 22 LTS (`nvm use 22`) |
+| `pm2` не найден после смены Node | `npm install -g pm2` |
+| Бот не отвечает | Проверь `pm2 logs` — смотри на ошибки при входящем сообщении |
+| Белый экран в Mini App | URL должен быть HTTPS, проверь Vercel статус |
+| `Module not found: express` | `npm install express` в папке проекта |
+| Git pull конфликт | `git fetch origin main && git reset --hard origin/main` |
 
 ---
 
-## 📱 Требования Telegram Mini Apps
-
-Все уже соблюдены в проекте:
-
-- ✅ HTTPS URL (Vercel)
-- ✅ `<meta name="viewport" content="width=device-width, initial-scale=1">` без zoom
-- ✅ Telegram WebApp SDK подключён через CDN в `index.html`
-- ✅ `tg.ready()` вызывается при загрузке (`initTelegram()` в App.jsx)
-- ✅ `tg.expand()` — разворачивает на весь экран
-- ✅ `tg.disableVerticalSwipes()` — отключает случайное закрытие
-- ✅ Цвета хедера подхватываются из Telegram темы через CSS-переменные `--tg-theme-*`
-
----
-
-## 🏗️ Архитектура приложения
-
-```
-Telegram
-  └── Bot
-       └── Menu Button → Web App URL (Vercel)
-                              └── React App (SPA)
-                                   ├── TopBar (Поиск + Тема)
-                                   ├── Pages (10 вкладок)
-                                   │    ├── RomancesPage   (Романы + Полиамория)
-                                   │    ├── BuildsPage     (Билды + Команда)
-                                   │    ├── EquipmentPage  (Шмот + Аура + Dark Urge)
-                                   │    ├── PotionsPage
-                                   │    ├── PartyPage      (Отряд + Respec + Квесты)
-                                   │    ├── MapPage
-                                   │    ├── LorePage
-                                   │    ├── GalleryPage
-                                   │    ├── AIPage
-                                   │    └── AboutPage
-                                   ├── SearchOverlay (оверлей)
-                                   └── BottomNav (скролл)
-```
-
----
-
-*Dark Urge · Oathbreaker · Minthara Path*
-*BG3 Patch 7+*
+*Dark Urge · Oathbreaker · Minthara Path · BG3 Patch 7+*

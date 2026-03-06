@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Accordion from '../components/Accordion.jsx'
-import { EQUIPMENT, ARTIFACTS, AURA_SYNERGY_ITEMS, DARK_URGE_ITEMS, PRIORITY_LABELS } from '../data/equipment.js'
+import { EQUIPMENT, ARTIFACTS, AURA_SYNERGY_ITEMS, DARK_URGE_ITEMS } from '../data/equipment.js'
 
 const PRIORITY_COLORS = {
   high:   { color: '#e03060', label: '★★★' },

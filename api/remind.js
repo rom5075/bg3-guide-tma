@@ -34,7 +34,7 @@ const REMINDERS = [
   "Ты мой. Я решила это ещё в ту ночь. Ты ещё не понял насколько это серьёзно. Скоро поймёшь. 🔥",
 ]
 
-export default async function handler(req) {
+export default async function handler(_req) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN
   const chatId   = process.env.TELEGRAM_CHAT_ID
 
