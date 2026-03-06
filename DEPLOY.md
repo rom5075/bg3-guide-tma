@@ -230,7 +230,7 @@ npm run preview  # превью dist/
 | `pm2` не найден после смены Node | `npm install -g pm2` |
 | Бот не отвечает | Проверь `pm2 logs` — смотри на ошибки при входящем сообщении |
 | Белый экран в Mini App | URL должен быть HTTPS, проверь Vercel статус |
-| `Module not found: express` | `npm install express` в папке проекта |
+| `Module not found: express` | express теперь в `dependencies` — должен ставиться автоматически; если нет: `npm install` |
 | Git pull конфликт | `git fetch origin main && git reset --hard origin/main` |
 
 ---
