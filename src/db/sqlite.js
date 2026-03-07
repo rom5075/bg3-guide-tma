@@ -75,6 +75,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_nights_user   ON intimate_log(user_id);
 `)
 
+// Add new columns to intimate_log if they don't exist yet (safe migration)
+for (const col of ['location', 'behavior']) {
+  try { db.exec(`ALTER TABLE intimate_log ADD COLUMN ${col} TEXT`) } catch {}
+}
+
 console.log(`[SQLite] DB ready: ${DB_PATH}`)
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -183,14 +188,14 @@ export function getMemories(userId, limit = 10) {
 // ── Intimate log ──────────────────────────────────────────────────────────────
 
 const stmtAddNight = db.prepare(
-  `INSERT INTO intimate_log (user_id, ordinal, summary, happened_at) VALUES (?, ?, ?, ?)`
+  `INSERT INTO intimate_log (user_id, ordinal, summary, happened_at, location, behavior) VALUES (?, ?, ?, ?, ?, ?)`
 )
 const stmtGetNights = db.prepare(
   `SELECT ordinal, summary, happened_at FROM intimate_log WHERE user_id = ? ORDER BY id DESC LIMIT ?`
 )
 
-export function addIntimateNight(userId, ordinal, summary, date) {
-  stmtAddNight.run(String(userId), ordinal ?? null, summary ?? null, date || new Date().toISOString())
+export function addIntimateNight(userId, ordinal, summary, date, location, behavior) {
+  stmtAddNight.run(String(userId), ordinal ?? null, summary ?? null, date || new Date().toISOString(), location ?? null, behavior ?? null)
 }
 
 /** Returns last `limit` intimate nights, oldest-first */

@@ -470,7 +470,7 @@ export default async function handler(req) {
       for (const m of newMemories)
         storage.addMemory(userId, m.type || null, m.summary, m.date || now)
       for (const n of newNights)
-        storage.addIntimateNight(userId, n.ordinal ?? null, n.summary, n.date || now)
+        storage.addIntimateNight(userId, n.ordinal ?? null, n.summary, n.date || now, n.location ?? null, n.behavior ?? null)
       for (const f of newFacts)
         storage.addFact(userId, f, now)
 

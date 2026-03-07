@@ -230,10 +230,14 @@ export function buildProfileContext(profile, dbData = null) {
     if (dbData.nights?.length > 0) {
       const last = dbData.nights[dbData.nights.length - 1]
       const lastDate = last.happened_at?.slice(0, 10) || '?'
-      lines.push(`- Последняя ночь (${lastDate}): ${last.summary}`)
+      const lastMeta = [last.location, last.behavior].filter(Boolean).join(' · ')
+      lines.push(`- Последняя ночь (${lastDate}${lastMeta ? ' · ' + lastMeta : ''}): ${last.summary}`)
       if (dbData.nights.length > 1) {
         const older = dbData.nights.slice(0, -1).slice(-4)
-        const fmt = older.map(e => `Ночь ${e.ordinal ?? '?'} (${e.happened_at?.slice(0, 10) || '?'}): ${e.summary}`).join(' | ')
+        const fmt = older.map(e => {
+          const meta = [e.location, e.behavior].filter(Boolean).join(' · ')
+          return `Ночь ${e.ordinal ?? '?'} (${e.happened_at?.slice(0, 10) || '?'}${meta ? ' · ' + meta : ''}): ${e.summary}`
+        }).join(' | ')
         lines.push(`- Предыдущие ночи: ${fmt}`)
       }
     }

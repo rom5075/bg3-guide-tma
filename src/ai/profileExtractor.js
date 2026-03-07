@@ -15,6 +15,8 @@ Return JSON with these fields:
   "suggested_mood": <"neutral"|"warm"|"cold"|"irritated"|"possessive"|"in_heat"|null>,
   "intimate_occurred": <true|false>,
   "intimate_summary": <"1-2 sentence description of the scene" | null>,
+  "intimate_location": <"где произошло, 1-5 слов на русском" | null>,
+  "intimate_behavior": <"поведение Минтары в сцене: похотливая|доминирующая|жестокая|игривая|страстная|холодная|подчиняющаяся — 1-3 слова" | null>,
   "name": <user's name if they mentioned it | null>,
   "act": <1|2|3 if user mentioned BG3 act | null>,
   "new_facts": <array of up to 3 new facts about the user | []>,
@@ -28,6 +30,8 @@ Rules:
 - suggested_mood: only set if the shift is obvious (e.g. user explicitly flirts → "warm", user proposes sex → "in_heat")
 - intimate_occurred: true ONLY if an actual intimate/sexual scene was described in the reply
 - intimate_summary: write in Russian, from Minthara's perspective, max 2 sentences
+- intimate_location: кратко где произошла сцена (лагерь, таверна, тронный зал...), null если неясно
+- intimate_behavior: ТОЛЬКО если intimate_occurred=true; характер Минтары, не описание действий
 - key_memory_worthy: true only for genuinely significant moments, not every exchange`
 }
 
@@ -99,7 +103,13 @@ export async function extractAndEvaluate(apiKey, userMsg, assistantMsg, existing
       if (intimateSummary) {
         p.lastIntimate = { date: now, summary: intimateSummary }
         // Build intimate log (keep last 10 entries)
-        const entry = { date: now, ordinal: p.intimateCount, summary: intimateSummary }
+        const entry = {
+          date:     now,
+          ordinal:  p.intimateCount,
+          summary:  intimateSummary,
+          location: ext.intimate_location ? String(ext.intimate_location).slice(0, 80) : null,
+          behavior: ext.intimate_behavior ? String(ext.intimate_behavior).slice(0, 50) : null,
+        }
         p.intimateLog = [...(p.intimateLog || []), entry].slice(-10)
       }
     }
