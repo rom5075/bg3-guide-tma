@@ -10,13 +10,13 @@ function sleep(ms) {
 
 /**
  * Get embedding vector for a text string.
- * Retries up to `retries` times on 429 rate-limit responses (2s backoff).
+ * Retries up to `retries` times on 429 — exponential backoff + Retry-After header.
  * @param {string} text
  * @param {string} apiKey — VOYAGE_API_KEY
- * @param {number} retries — max retry attempts on 429 (default 3)
+ * @param {number} retries — max retry attempts on 429 (default 5)
  * @returns {Float32Array|null}
  */
-export async function getEmbedding(text, apiKey, retries = 3) {
+export async function getEmbedding(text, apiKey, retries = 5) {
   if (!apiKey || !text?.trim()) return null
   try {
     const res = await fetch(VOYAGE_API, {
@@ -29,10 +29,17 @@ export async function getEmbedding(text, apiKey, retries = 3) {
     })
     if (res.status === 429) {
       if (retries > 0) {
-        await sleep(2000)
+        // Respect Retry-After header if present; otherwise exponential backoff
+        const retryAfterSec = parseInt(res.headers.get('Retry-After') || '0', 10)
+        const attempt = 5 - retries  // 0, 1, 2, 3, 4
+        const backoff = retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : Math.min(5000 * Math.pow(2, attempt), 60000)  // 5s, 10s, 20s, 40s, 60s
+        console.error(`[embeddings] 429 — waiting ${Math.round(backoff / 1000)}s (retry ${5 - retries + 1}/5)`)
+        await sleep(backoff)
         return getEmbedding(text, apiKey, retries - 1)
       }
-      console.error('[embeddings] 429 rate limit — retries exhausted')
+      console.error('[embeddings] 429 — retries exhausted')
       return null
     }
     if (!res.ok) {

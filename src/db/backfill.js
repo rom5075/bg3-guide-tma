@@ -5,8 +5,9 @@
 import * as storage from './sqlite.js'
 import { getEmbedding, serializeVector } from '../ai/embeddings.js'
 
-const VOYAGE_KEY = process.env.VOYAGE_API_KEY
-const DELAY_MS   = 300  // 300ms = ~3 req/sec, safe under Voyage AI Tier 0 (300 RPM = 5 req/sec)
+const VOYAGE_KEY          = process.env.VOYAGE_API_KEY
+const DELAY_MS            = 2000   // 2s between requests = 30 RPM — very conservative
+const COOLDOWN_MS         = 60_000 // 60s cooldown after retries exhausted
 
 if (!VOYAGE_KEY) {
   console.error('[backfill] VOYAGE_API_KEY not set — exiting')
@@ -40,7 +41,8 @@ async function backfillTable(label, rows, textKey, table) {
       done++
     } else {
       failed++
-      console.error(`\n[backfill] ${label}: failed id=${row.id} text="${text.slice(0, 60)}..."`)
+      console.error(`\n[backfill] ${label}: FAILED id=${row.id} — cooling down ${COOLDOWN_MS / 1000}s...`)
+      await sleep(COOLDOWN_MS)  // long pause after retries exhausted
     }
     process.stdout.write(`\r[backfill] ${label}: ${done}/${missing.length} embedded, ${failed} failed`)
     await sleep(DELAY_MS)
