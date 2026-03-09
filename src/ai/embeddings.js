@@ -4,13 +4,19 @@
 const VOYAGE_API = 'https://api.voyageai.com/v1/embeddings'
 const MODEL      = 'voyage-3-lite'
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 /**
  * Get embedding vector for a text string.
+ * Retries up to `retries` times on 429 rate-limit responses (2s backoff).
  * @param {string} text
  * @param {string} apiKey — VOYAGE_API_KEY
+ * @param {number} retries — max retry attempts on 429 (default 3)
  * @returns {Float32Array|null}
  */
-export async function getEmbedding(text, apiKey) {
+export async function getEmbedding(text, apiKey, retries = 3) {
   if (!apiKey || !text?.trim()) return null
   try {
     const res = await fetch(VOYAGE_API, {
@@ -21,12 +27,26 @@ export async function getEmbedding(text, apiKey) {
       },
       body: JSON.stringify({ model: MODEL, input: [text.slice(0, 2000)] }),
     })
-    if (!res.ok) return null
+    if (res.status === 429) {
+      if (retries > 0) {
+        await sleep(2000)
+        return getEmbedding(text, apiKey, retries - 1)
+      }
+      console.error('[embeddings] 429 rate limit — retries exhausted')
+      return null
+    }
+    if (!res.ok) {
+      console.error(`[embeddings] HTTP ${res.status}`)
+      return null
+    }
     const data = await res.json()
     const vec = data?.data?.[0]?.embedding
     if (!Array.isArray(vec)) return null
     return new Float32Array(vec)
-  } catch { return null }
+  } catch (e) {
+    console.error('[embeddings] fetch error:', e?.message)
+    return null
+  }
 }
 
 /**
