@@ -17,8 +17,9 @@ import {
 import { routeQuery }          from '../src/ai/modelRouter.js'
 import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
 import { callAI }              from '../src/ai/callAI.js'
-import { extractAndEvaluate }  from '../src/ai/profileExtractor.js'
-import * as storage            from '../src/db/sqlite.js'
+import { extractAndEvaluate }                          from '../src/ai/profileExtractor.js'
+import { getEmbedding, findMostRelevant, serializeVector } from '../src/ai/embeddings.js'
+import * as storage                                    from '../src/db/sqlite.js'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -351,11 +352,28 @@ export default async function handler(req) {
     intimateMode: profile.intimateMode,
   }
 
-  // DB data for prompt — more context than Vercel version
-  const dbMemories = storage.getMemories(userId, 10)       // 10 vs 4 in Vercel
-  const dbNights   = storage.getIntimateNights(userId, 5)  // 5 vs 3
-  const dbFacts    = storage.getFacts(userId, 8)           // 8 vs 5
-  const dbData     = { memories: dbMemories, nights: dbNights, facts: dbFacts }
+  // DB data for prompt — RAG (semantic search) or fallback (last N)
+  const voyageKey = process.env.VOYAGE_API_KEY
+  let dbMemories, dbNights, dbFacts
+
+  if (voyageKey) {
+    // RAG: embed current message, find most relevant records
+    const queryVec = await getEmbedding(text, voyageKey)
+    const allMem   = storage.getAllMemories(userId)
+    const allNight = storage.getAllNights(userId)
+    const allFact  = storage.getAllFacts(userId)
+
+    dbMemories = findMostRelevant(queryVec, allMem,   'summary', 10)
+    dbNights   = findMostRelevant(queryVec, allNight, 'summary', 5)
+    dbFacts    = findMostRelevant(queryVec, allFact,  'fact',    8).map(r => r.fact)
+  } else {
+    // Fallback: last N records (original behaviour)
+    dbMemories = storage.getMemories(userId, 10)
+    dbNights   = storage.getIntimateNights(userId, 5)
+    dbFacts    = storage.getFacts(userId, 8)
+  }
+
+  const dbData = { memories: dbMemories, nights: dbNights, facts: dbFacts }
 
   // Apply cold mood if inactive 3+ days
   if (profile.lastSeen) {
@@ -466,13 +484,19 @@ export default async function handler(req) {
       const newFacts = (updatedProfile.knownFacts || [])
         .filter(f => typeof f === 'string' && f.trim() && !existingFactStrings.has(f))
 
-      // Persist new items to SQLite
-      for (const m of newMemories)
-        storage.addMemory(userId, m.type || null, m.summary, m.date || now)
-      for (const n of newNights)
-        storage.addIntimateNight(userId, n.ordinal ?? null, n.summary, n.date || now, n.location ?? null, n.behavior ?? null)
-      for (const f of newFacts)
-        storage.addFact(userId, f, now)
+      // Persist new items to SQLite (with embeddings if Voyage key is set)
+      for (const m of newMemories) {
+        const emb = voyageKey ? await getEmbedding(m.summary, voyageKey) : null
+        storage.addMemory(userId, m.type || null, m.summary, m.date || now, emb ? serializeVector(emb) : null)
+      }
+      for (const n of newNights) {
+        const emb = voyageKey ? await getEmbedding(n.summary, voyageKey) : null
+        storage.addIntimateNight(userId, n.ordinal ?? null, n.summary, n.date || now, n.location ?? null, n.behavior ?? null, emb ? serializeVector(emb) : null)
+      }
+      for (const f of newFacts) {
+        const emb = voyageKey ? await getEmbedding(f, voyageKey) : null
+        storage.addFact(userId, f, now, emb ? serializeVector(emb) : null)
+      }
 
       if (newMemories.length || newNights.length || newFacts.length) {
         console.log(`[profile] +${newMemories.length} mem, +${newNights.length} nights, +${newFacts.length} facts`)

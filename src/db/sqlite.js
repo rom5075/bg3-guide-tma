@@ -75,9 +75,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_nights_user   ON intimate_log(user_id);
 `)
 
-// Add new columns to intimate_log if they don't exist yet (safe migration)
+// Safe migrations — add new columns if they don't exist yet
 for (const col of ['location', 'behavior']) {
   try { db.exec(`ALTER TABLE intimate_log ADD COLUMN ${col} TEXT`) } catch {}
+}
+for (const tbl of ['memories', 'intimate_log', 'known_facts']) {
+  try { db.exec(`ALTER TABLE ${tbl} ADD COLUMN embedding BLOB`) } catch {}
 }
 
 console.log(`[SQLite] DB ready: ${DB_PATH}`)
@@ -169,56 +172,85 @@ export function resetSessionFlags(userId) {
 // ── Memories ──────────────────────────────────────────────────────────────────
 
 const stmtAddMemory = db.prepare(
-  `INSERT INTO memories (user_id, memory_type, summary, created_at) VALUES (?, ?, ?, ?)`
+  `INSERT INTO memories (user_id, memory_type, summary, created_at, embedding) VALUES (?, ?, ?, ?, ?)`
 )
 const stmtGetMemories = db.prepare(
   `SELECT memory_type, summary, created_at FROM memories WHERE user_id = ? ORDER BY id DESC LIMIT ?`
 )
+const stmtGetAllMemories = db.prepare(
+  `SELECT id, memory_type, summary, created_at, embedding FROM memories WHERE user_id = ? ORDER BY id ASC`
+)
 
-export function addMemory(userId, type, summary, date) {
-  stmtAddMemory.run(String(userId), type || null, summary, date || new Date().toISOString())
+export function addMemory(userId, type, summary, date, embedding = null) {
+  stmtAddMemory.run(String(userId), type || null, summary, date || new Date().toISOString(), embedding ?? null)
 }
 
-/** Returns last `limit` memories, oldest-first */
+/** Returns last `limit` memories, oldest-first (fallback when no RAG) */
 export function getMemories(userId, limit = 10) {
   const rows = stmtGetMemories.all(String(userId), limit)
   return rows.reverse()
 }
 
+/** Returns ALL memories with embeddings for RAG search */
+export function getAllMemories(userId) {
+  return stmtGetAllMemories.all(String(userId))
+}
+
 // ── Intimate log ──────────────────────────────────────────────────────────────
 
 const stmtAddNight = db.prepare(
-  `INSERT INTO intimate_log (user_id, ordinal, summary, happened_at, location, behavior) VALUES (?, ?, ?, ?, ?, ?)`
+  `INSERT INTO intimate_log (user_id, ordinal, summary, happened_at, location, behavior, embedding) VALUES (?, ?, ?, ?, ?, ?, ?)`
 )
 const stmtGetNights = db.prepare(
-  `SELECT ordinal, summary, happened_at FROM intimate_log WHERE user_id = ? ORDER BY id DESC LIMIT ?`
+  `SELECT ordinal, summary, happened_at, location, behavior FROM intimate_log WHERE user_id = ? ORDER BY id DESC LIMIT ?`
+)
+const stmtGetAllNights = db.prepare(
+  `SELECT id, ordinal, summary, happened_at, location, behavior, embedding FROM intimate_log WHERE user_id = ? ORDER BY id ASC`
 )
 
-export function addIntimateNight(userId, ordinal, summary, date, location, behavior) {
-  stmtAddNight.run(String(userId), ordinal ?? null, summary ?? null, date || new Date().toISOString(), location ?? null, behavior ?? null)
+export function addIntimateNight(userId, ordinal, summary, date, location, behavior, embedding = null) {
+  stmtAddNight.run(String(userId), ordinal ?? null, summary ?? null, date || new Date().toISOString(), location ?? null, behavior ?? null, embedding ?? null)
 }
 
-/** Returns last `limit` intimate nights, oldest-first */
+/** Returns last `limit` intimate nights, oldest-first (fallback when no RAG) */
 export function getIntimateNights(userId, limit = 5) {
   const rows = stmtGetNights.all(String(userId), limit)
   return rows.reverse()
 }
 
+/** Returns ALL intimate nights with embeddings for RAG search */
+export function getAllNights(userId) {
+  return stmtGetAllNights.all(String(userId))
+}
+
 // ── Known facts ───────────────────────────────────────────────────────────────
 
 const stmtAddFact = db.prepare(
-  `INSERT INTO known_facts (user_id, fact, created_at) VALUES (?, ?, ?)`
+  `INSERT INTO known_facts (user_id, fact, created_at, embedding) VALUES (?, ?, ?, ?)`
 )
 const stmtGetFacts = db.prepare(
   `SELECT fact FROM known_facts WHERE user_id = ? ORDER BY id DESC LIMIT ?`
 )
+const stmtGetAllFacts = db.prepare(
+  `SELECT id, fact, embedding FROM known_facts WHERE user_id = ? ORDER BY id ASC`
+)
 
-export function addFact(userId, fact, date) {
-  stmtAddFact.run(String(userId), fact, date || new Date().toISOString())
+export function addFact(userId, fact, date, embedding = null) {
+  stmtAddFact.run(String(userId), fact, date || new Date().toISOString(), embedding ?? null)
 }
 
-/** Returns last `limit` facts as string array, oldest-first */
+/** Returns last `limit` facts as string array, oldest-first (fallback when no RAG) */
 export function getFacts(userId, limit = 8) {
   const rows = stmtGetFacts.all(String(userId), limit)
   return rows.reverse().map(r => r.fact)
+}
+
+/** Returns ALL facts with embeddings for RAG search */
+export function getAllFacts(userId) {
+  return stmtGetAllFacts.all(String(userId))
+}
+
+/** Update embedding for an existing record — used by backfill.js */
+export function updateEmbedding(table, id, embeddingBuffer) {
+  db.prepare(`UPDATE ${table} SET embedding = ? WHERE id = ?`).run(embeddingBuffer, id)
 }
