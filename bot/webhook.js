@@ -16,7 +16,6 @@ import {
 } from '../src/ai/systemPrompt.js'
 import { routeQuery }          from '../src/ai/modelRouter.js'
 import { getKnowledgeContext } from '../src/ai/knowledgeBase.js'
-import { callAI }              from '../src/ai/callAI.js'
 import { extractAndEvaluate }                          from '../src/ai/profileExtractor.js'
 import { getEmbedding, findMostRelevant, serializeVector } from '../src/ai/embeddings.js'
 import * as storage                                    from '../src/db/sqlite.js'
@@ -85,6 +84,185 @@ async function tgSendChatAction(token, chatId) {
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ chat_id: chatId, action: 'typing' }),
   })
+}
+
+// Returns Telegram message object (contains message_id) for streaming edits
+async function tgSendRaw(token, chatId, text) {
+  try {
+    const res  = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ chat_id: chatId, text }),
+    })
+    const data = await res.json()
+    return data.result ?? null
+  } catch { return null }
+}
+
+// Edit existing message — plain text, no parse_mode (safe for partial streaming text)
+async function tgEdit(token, chatId, msgId, text) {
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ chat_id: chatId, message_id: msgId, text }),
+    })
+  } catch { /* ignore throttle / "message not modified" errors */ }
+}
+
+// Final edit — with Markdown and keyboard; falls back to plain on parse error
+async function tgEditMarkdown(token, chatId, msgId, text, replyMarkup = null) {
+  try {
+    const res  = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        chat_id:    chatId,
+        message_id: msgId,
+        text,
+        parse_mode: 'Markdown',
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      }),
+    })
+    const data = await res.json()
+    if (!data.ok) throw new Error(data.description)
+  } catch {
+    await tgEdit(token, chatId, msgId, text)
+  }
+}
+
+// ─── Streaming Anthropic call with Tavily tool use ────────────────────────────
+
+const WEB_SEARCH_TOOL = {
+  name: 'web_search',
+  description: `Search the internet for any information the user requests. Use when:
+- User asks about recent events, news, or updates (BG3 patches, real world, anything)
+- User explicitly asks to "find", "search", "look up", or "check" something
+- The question requires up-to-date information you may not have
+- User asks about any topic outside of BG3 that benefits from a web search
+Use a clear, specific search query. For BG3 questions include "Baldur's Gate 3" in the query.`,
+  input_schema: {
+    type: 'object',
+    properties: { query: { type: 'string', description: 'Search query string. Keep it concise and specific.' } },
+    required: ['query'],
+  },
+}
+
+async function tavilySearch(query) {
+  const apiKey = process.env.TAVILY_API_KEY
+  if (!apiKey) return 'Поиск недоступен — TAVILY_API_KEY не настроен.'
+  try {
+    const res  = await fetch('https://api.tavily.com/search', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ api_key: apiKey, query, search_depth: 'basic', max_results: 3, include_answer: true }),
+    })
+    if (!res.ok) return `Ошибка поиска: ${res.status}`
+    const data  = await res.json()
+    const parts = []
+    if (data.answer) parts.push(`КРАТКИЙ ОТВЕТ: ${data.answer}`)
+    if (data.results?.length) {
+      parts.push(data.results.map(r => `[${r.title}]\n${(r.content || '').slice(0, 500)}\nИсточник: ${r.url}`).join('\n\n'))
+    }
+    return parts.join('\n\n') || 'Результатов не найдено.'
+  } catch (err) { return `Ошибка поиска: ${err.message}` }
+}
+
+/**
+ * Stream Anthropic response. Calls onChunk(text) for each streamed text delta.
+ * Handles tool use (Tavily search) with a non-streaming second call.
+ * @returns {Promise<{ text: string, usedSearch: boolean }>}
+ */
+async function streamAI({ apiKey, model, systemPrompt, messages }, onChunk) {
+  const hasTavily = !!process.env.TAVILY_API_KEY
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body:    JSON.stringify({
+      model,
+      max_tokens: 1024,
+      system:     systemPrompt,
+      messages,
+      stream:     true,
+      ...(hasTavily ? { tools: [WEB_SEARCH_TOOL], tool_choice: { type: 'auto' } } : {}),
+    }),
+  })
+
+  if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}`)
+
+  const reader  = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer    = ''
+  let text      = ''
+  let toolBlock = null   // { id, name, inputJson }
+  let stopReason = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop()  // keep incomplete trailing line
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const raw = line.slice(6).trim()
+      if (!raw || raw === '[DONE]') continue
+      let ev
+      try { ev = JSON.parse(raw) } catch { continue }
+
+      if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
+        toolBlock = { id: ev.content_block.id, name: ev.content_block.name, inputJson: '' }
+      }
+      if (ev.type === 'content_block_delta') {
+        if (ev.delta?.type === 'text_delta') {
+          text += ev.delta.text
+          await onChunk(ev.delta.text)
+        }
+        if (ev.delta?.type === 'input_json_delta' && toolBlock) {
+          toolBlock.inputJson += ev.delta.partial_json
+        }
+      }
+      if (ev.type === 'message_delta') {
+        stopReason = ev.delta?.stop_reason
+      }
+    }
+  }
+
+  // Tool use: Tavily search → non-streaming second call
+  if (stopReason === 'tool_use' && toolBlock) {
+    await onChunk('\n\n_🕵️ Ищу свежие сведения..._')
+
+    let toolInput = {}
+    try { toolInput = JSON.parse(toolBlock.inputJson) } catch {}
+
+    const searchResult = await tavilySearch(toolInput.query || '')
+
+    const continuedMessages = [
+      ...messages,
+      {
+        role: 'assistant',
+        content: [
+          ...(text ? [{ type: 'text', text }] : []),
+          { type: 'tool_use', id: toolBlock.id, name: toolBlock.name, input: toolInput },
+        ],
+      },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolBlock.id, content: searchResult }] },
+    ]
+
+    const res2 = await fetch('https://api.anthropic.com/v1/messages', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body:    JSON.stringify({ model, max_tokens: 1024, system: systemPrompt, messages: continuedMessages }),
+    })
+    if (!res2.ok) throw new Error(`Anthropic 2nd call HTTP ${res2.status}`)
+    const data2     = await res2.json()
+    const finalText = data2.content?.filter(b => b.type === 'text').map(b => b.text).join('') || ''
+    return { text: finalText, usedSearch: true }
+  }
+
+  return { text, usedSearch: false }
 }
 
 // ─── Photo download ───────────────────────────────────────────────────────────
@@ -430,10 +608,27 @@ export default async function handler(req) {
   const apiMessages = session.messages.map(m => ({ role: m.role, content: m.content }))
   apiMessages[apiMessages.length - 1].content = userContent
 
-  // ── Call AI ───────────────────────────────────────────────────────────────────
+  // ── Call AI (streaming) ───────────────────────────────────────────────────────
 
+  let msgId = null
   try {
-    const { text: reply, usedSearch } = await callAI(anthropicKey, route.model, systemPrompt, apiMessages)
+    // Send ▌ placeholder immediately, then stream and edit
+    const placeholder = await tgSendRaw(botToken, chatId, '▌')
+    msgId = placeholder?.message_id
+
+    let accumulated = ''
+    let lastEdit    = Date.now()
+
+    const { text: reply, usedSearch } = await streamAI(
+      { apiKey: anthropicKey, model: route.model, systemPrompt, messages: apiMessages },
+      async (chunk) => {
+        accumulated += chunk
+        if (msgId && Date.now() - lastEdit > 800) {
+          await tgEdit(botToken, chatId, msgId, accumulated + ' ▌')
+          lastEdit = Date.now()
+        }
+      },
+    )
 
     // Save assistant reply to SQLite
     storage.saveMessage(userId, 'assistant', reply)
@@ -444,11 +639,15 @@ export default async function handler(req) {
       ? reply + '\n\n_🕵️ Тени нашептали свежие сведения..._'
       : reply)
 
-    // ── Send response ────────────────────────────────────────────────────────────
-    try {
-      await tgSend(botToken, chatId, finalReply, MAIN_KEYBOARD)
-    } catch {
-      await tgSendPlain(botToken, chatId, reply, MAIN_KEYBOARD)
+    // ── Final edit with Markdown + keyboard ──────────────────────────────────────
+    if (msgId) {
+      await tgEditMarkdown(botToken, chatId, msgId, finalReply, MAIN_KEYBOARD)
+    } else {
+      try {
+        await tgSend(botToken, chatId, finalReply, MAIN_KEYBOARD)
+      } catch {
+        await tgSendPlain(botToken, chatId, reply, MAIN_KEYBOARD)
+      }
     }
 
     // ── Profile extraction + delta save ──────────────────────────────────────────
@@ -533,7 +732,12 @@ export default async function handler(req) {
       '_Магия Абсолюта... помехи. Повтори, смертный._',
       '_Хм. Что-то нарушило мою связь с тобой. Говори снова._',
     ]
-    await tgSend(botToken, chatId, fallbacks[Math.floor(Math.random() * fallbacks.length)], MAIN_KEYBOARD)
+    const errMsg = fallbacks[Math.floor(Math.random() * fallbacks.length)]
+    if (msgId) {
+      await tgEditMarkdown(botToken, chatId, msgId, errMsg, MAIN_KEYBOARD)
+    } else {
+      await tgSend(botToken, chatId, errMsg, MAIN_KEYBOARD)
+    }
   }
 
   return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
