@@ -541,9 +541,9 @@ export default async function handler(req) {
 🔥 Активных (7 дней): ${s.active7d}
 📅 Новых сегодня: ${s.newToday}
 
-🧠 Воспоминаний: ${s.memories}
-🌙 Интимных ночей: ${s.nights}
-📝 Фактов: ${s.facts}
+🧠 Воспоминаний: ${s.memories}${s.memoriesNoEmb ? ` _(без эмб: ${s.memoriesNoEmb})_` : ''}
+🌙 Интимных ночей: ${s.nights}${s.nightsNoEmb ? ` _(без эмб: ${s.nightsNoEmb})_` : ''}
+📝 Фактов: ${s.facts}${s.factsNoEmb ? ` _(без эмб: ${s.factsNoEmb})_` : ''}
 
 💌 Романтический режим: ${s.romanceMode}
 🔥 Интимный режим: ${s.intimateMode}

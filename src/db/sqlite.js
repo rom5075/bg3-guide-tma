@@ -268,9 +268,12 @@ export function getStats() {
     newToday:     db.prepare(
       "SELECT COUNT(*) as n FROM profiles WHERE first_seen >= date('now')"
     ).get().n,
-    memories:     db.prepare('SELECT COUNT(*) as n FROM memories').get().n,
-    nights:       db.prepare('SELECT COUNT(*) as n FROM intimate_log').get().n,
-    facts:        db.prepare('SELECT COUNT(*) as n FROM known_facts').get().n,
+    memories:      db.prepare('SELECT COUNT(*) as n FROM memories').get().n,
+    memoriesNoEmb: db.prepare('SELECT COUNT(*) as n FROM memories WHERE embedding IS NULL').get().n,
+    nights:        db.prepare('SELECT COUNT(*) as n FROM intimate_log').get().n,
+    nightsNoEmb:   db.prepare('SELECT COUNT(*) as n FROM intimate_log WHERE embedding IS NULL').get().n,
+    facts:         db.prepare('SELECT COUNT(*) as n FROM known_facts').get().n,
+    factsNoEmb:    db.prepare('SELECT COUNT(*) as n FROM known_facts WHERE embedding IS NULL').get().n,
     romanceMode:  db.prepare('SELECT COUNT(*) as n FROM profiles WHERE romance_mode = 1').get().n,
     intimateMode: db.prepare('SELECT COUNT(*) as n FROM profiles WHERE intimate_mode = 1').get().n,
     moods:        db.prepare(
