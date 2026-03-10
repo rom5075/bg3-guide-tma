@@ -358,7 +358,8 @@ export default async function handler(req) {
 
   if (voyageKey) {
     // RAG: embed current message, find most relevant records
-    const queryVec = await getEmbedding(text, voyageKey)
+    // retries=0 — no waiting in live bot handler; fallback to last-N on 429
+    const queryVec = await getEmbedding(text, voyageKey, 0)
     const allMem   = storage.getAllMemories(userId)
     const allNight = storage.getAllNights(userId)
     const allFact  = storage.getAllFacts(userId)
@@ -486,15 +487,15 @@ export default async function handler(req) {
 
       // Persist new items to SQLite (with embeddings if Voyage key is set)
       for (const m of newMemories) {
-        const emb = voyageKey ? await getEmbedding(m.summary, voyageKey) : null
+        const emb = voyageKey ? await getEmbedding(m.summary, voyageKey, 0) : null
         storage.addMemory(userId, m.type || null, m.summary, m.date || now, emb ? serializeVector(emb) : null)
       }
       for (const n of newNights) {
-        const emb = voyageKey ? await getEmbedding(n.summary, voyageKey) : null
+        const emb = voyageKey ? await getEmbedding(n.summary, voyageKey, 0) : null
         storage.addIntimateNight(userId, n.ordinal ?? null, n.summary, n.date || now, n.location ?? null, n.behavior ?? null, emb ? serializeVector(emb) : null)
       }
       for (const f of newFacts) {
-        const emb = voyageKey ? await getEmbedding(f, voyageKey) : null
+        const emb = voyageKey ? await getEmbedding(f, voyageKey, 0) : null
         storage.addFact(userId, f, now, emb ? serializeVector(emb) : null)
       }
 
