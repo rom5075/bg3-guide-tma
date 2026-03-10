@@ -51,6 +51,27 @@ function normalizeProfile(row) {
   }
 }
 
+// ─── Markdown → HTML converter ────────────────────────────────────────────────
+// Telegram HTML mode is far more reliable than Markdown v1 (no emoji/Cyrillic edge cases)
+
+function mdToHtml(text) {
+  return text
+    // 1. HTML-escape raw chars first (protect against broken tags in final output)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // 2. Fenced code blocks ```...```
+    .replace(/```[\w]*\n?([\s\S]*?)```/g, (_, c) => `<pre>${c.trim()}</pre>`)
+    // 3. Inline code `code`
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    // 4. Bold **text**
+    .replace(/\*\*(.+?)\*\*/gs, '<b>$1</b>')
+    // 5. Bold/italic *text* — treat single * as bold (Minthara style)
+    .replace(/\*([^*\n]+)\*/g, '<b>$1</b>')
+    // 6. Italic _text_
+    .replace(/_([^_\n]+)_/g, '<i>$1</i>')
+}
+
 // ─── Telegram API helpers ─────────────────────────────────────────────────────
 
 async function tgSend(token, chatId, text, replyMarkup = null) {
@@ -59,8 +80,8 @@ async function tgSend(token, chatId, text, replyMarkup = null) {
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({
       chat_id:    chatId,
-      text,
-      parse_mode: 'Markdown',
+      text:       mdToHtml(text),
+      parse_mode: 'HTML',
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     }),
   })
@@ -110,7 +131,7 @@ async function tgEdit(token, chatId, msgId, text) {
   } catch { /* ignore throttle / "message not modified" errors */ }
 }
 
-// Final edit — with Markdown and keyboard; falls back to plain on parse error
+// Final edit — with HTML formatting and keyboard; falls back to plain on error
 async function tgEditMarkdown(token, chatId, msgId, text, replyMarkup = null) {
   try {
     const res  = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
@@ -119,8 +140,8 @@ async function tgEditMarkdown(token, chatId, msgId, text, replyMarkup = null) {
       body:    JSON.stringify({
         chat_id:    chatId,
         message_id: msgId,
-        text,
-        parse_mode: 'Markdown',
+        text:       mdToHtml(text),
+        parse_mode: 'HTML',
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       }),
     })
@@ -470,8 +491,8 @@ export default async function handler(req) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         chat_id:      chatId,
-        text:         '🗡️ *Минтара Баэнре*\n\n_Ты осмелился потревожить дочь дома Баэнре? Хорошо. Если пришёл за знаниями о пути Тёмного Порыва — говори. Если за пустой болтовнёй — я найду тебе применение получше._\n\n💬 Пиши мне — я отвечу',
-        parse_mode:   'Markdown',
+        text:         '🗡️ <b>Минтара Баэнре</b>\n\n<i>Ты осмелился потревожить дочь дома Баэнре? Хорошо. Если пришёл за знаниями о пути Тёмного Порыва — говори. Если за пустой болтовнёй — я найду тебе применение получше.</i>\n\n💬 Пиши мне — я отвечу',
+        parse_mode:   'HTML',
         reply_markup: kb,
       }),
     })
@@ -496,8 +517,8 @@ export default async function handler(req) {
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         chat_id:      chatId,
-        text:         '_Читай и учись, смертный._',
-        parse_mode:   'Markdown',
+        text:         '<i>Читай и учись, смертный.</i>',
+        parse_mode:   'HTML',
         reply_markup: { inline_keyboard: [[{ text: '📖 Открыть гайд', web_app: { url: miniAppUrl } }]] },
       }),
     })
