@@ -671,9 +671,11 @@ export default async function handler(req) {
       ? reply + '\n\n_🕵️ Тени нашептали свежие сведения..._'
       : reply)
 
-    // ── Final edit with Markdown + keyboard ──────────────────────────────────────
+    // ── Final edit with HTML formatting ──────────────────────────────────────────
+    // Note: editMessageText does NOT support ReplyKeyboardMarkup — only InlineKeyboard.
+    // The reply keyboard persists globally from the previous tgSend call.
     if (msgId) {
-      await tgEditMarkdown(botToken, chatId, msgId, finalReply, MAIN_KEYBOARD)
+      await tgEditMarkdown(botToken, chatId, msgId, finalReply)
     } else {
       try {
         await tgSend(botToken, chatId, finalReply, MAIN_KEYBOARD)
@@ -766,7 +768,7 @@ export default async function handler(req) {
     ]
     const errMsg = fallbacks[Math.floor(Math.random() * fallbacks.length)]
     if (msgId) {
-      await tgEditMarkdown(botToken, chatId, msgId, errMsg, MAIN_KEYBOARD)
+      await tgEditMarkdown(botToken, chatId, msgId, errMsg)
     } else {
       await tgSend(botToken, chatId, errMsg, MAIN_KEYBOARD)
     }
