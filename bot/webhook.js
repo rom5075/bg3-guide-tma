@@ -432,6 +432,7 @@ export default async function handler(req) {
   const botToken     = process.env.TELEGRAM_BOT_TOKEN
   const anthropicKey = process.env.ANTHROPIC_API_KEY
   const miniAppUrl   = process.env.MINI_APP_URL
+  const adminId      = process.env.ADMIN_ID
 
   if (!botToken || !anthropicKey) {
     return new Response('Missing env vars', { status: 500 })
@@ -517,6 +518,40 @@ export default async function handler(req) {
     storage.deleteMessages(userId)
     storage.resetSessionFlags(userId)
     await tgSend(botToken, chatId, '_Хм. Начинаем заново? Я помню всё — но позволю тебе притвориться._', MAIN_KEYBOARD)
+    return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // ── /stats (admin only) ──────────────────────────────────────────────────────
+
+  if (text === '/stats') {
+    if (!adminId || String(userId) !== String(adminId)) {
+      await tgSend(botToken, chatId, '_Этот приказ не для смертных._', MAIN_KEYBOARD)
+      return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
+    }
+
+    const s = storage.getStats()
+    const moodLines = s.moods
+      .map(m => `  • ${m.mood || 'нет'} — ${m.cnt}`)
+      .join('\n')
+
+    const msg = `📊 *Статистика Минтары*
+
+👥 Пользователей: ${s.users}
+💬 Сообщений: ${s.messages.toLocaleString('ru')}
+🔥 Активных (7 дней): ${s.active7d}
+📅 Новых сегодня: ${s.newToday}
+
+🧠 Воспоминаний: ${s.memories}
+🌙 Интимных ночей: ${s.nights}
+📝 Фактов: ${s.facts}
+
+💌 Романтический режим: ${s.romanceMode}
+🔥 Интимный режим: ${s.intimateMode}
+
+😊 *Настроения:*
+${moodLines}`
+
+    await tgSend(botToken, chatId, msg, MAIN_KEYBOARD)
     return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } })
   }
 

@@ -254,3 +254,27 @@ export function getAllFacts(userId) {
 export function updateEmbedding(table, id, embeddingBuffer) {
   db.prepare(`UPDATE ${table} SET embedding = ? WHERE id = ?`).run(embeddingBuffer, id)
 }
+
+// ── Admin stats ───────────────────────────────────────────────────────────────
+
+/** Aggregate statistics across all users — used by /stats admin command */
+export function getStats() {
+  return {
+    users:        db.prepare('SELECT COUNT(*) as n FROM profiles').get().n,
+    messages:     db.prepare('SELECT COUNT(*) as n FROM messages').get().n,
+    active7d:     db.prepare(
+      "SELECT COUNT(DISTINCT user_id) as n FROM messages WHERE created_at >= datetime('now', '-7 days')"
+    ).get().n,
+    newToday:     db.prepare(
+      "SELECT COUNT(*) as n FROM profiles WHERE first_seen >= date('now')"
+    ).get().n,
+    memories:     db.prepare('SELECT COUNT(*) as n FROM memories').get().n,
+    nights:       db.prepare('SELECT COUNT(*) as n FROM intimate_log').get().n,
+    facts:        db.prepare('SELECT COUNT(*) as n FROM known_facts').get().n,
+    romanceMode:  db.prepare('SELECT COUNT(*) as n FROM profiles WHERE romance_mode = 1').get().n,
+    intimateMode: db.prepare('SELECT COUNT(*) as n FROM profiles WHERE intimate_mode = 1').get().n,
+    moods:        db.prepare(
+      'SELECT mood, COUNT(*) as cnt FROM profiles GROUP BY mood ORDER BY cnt DESC'
+    ).all(),
+  }
+}
