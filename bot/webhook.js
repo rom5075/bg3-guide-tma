@@ -131,8 +131,9 @@ async function tgEdit(token, chatId, msgId, text) {
   } catch { /* ignore throttle / "message not modified" errors */ }
 }
 
-// Final edit — with HTML formatting and keyboard; falls back to plain on error
+// Final edit — with HTML formatting and keyboard; falls back to stripped plain text
 async function tgEditMarkdown(token, chatId, msgId, text, replyMarkup = null) {
+  const html = mdToHtml(text)
   try {
     const res  = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
       method:  'POST',
@@ -140,15 +141,25 @@ async function tgEditMarkdown(token, chatId, msgId, text, replyMarkup = null) {
       body:    JSON.stringify({
         chat_id:    chatId,
         message_id: msgId,
-        text:       mdToHtml(text),
+        text:       html,
         parse_mode: 'HTML',
         ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       }),
     })
     const data = await res.json()
-    if (!data.ok) throw new Error(data.description)
-  } catch {
-    await tgEdit(token, chatId, msgId, text)
+    if (!data.ok) {
+      console.error('[tgEditMarkdown] HTML rejected by Telegram:', data.description)
+      console.error('[tgEditMarkdown] HTML snippet (first 300):', html.slice(0, 300))
+      throw new Error(data.description)
+    }
+  } catch (err) {
+    console.error('[tgEditMarkdown] fallback triggered:', err.message)
+    // Strip markdown symbols so user doesn't see raw * and _
+    const plain = text
+      .replace(/\*\*(.+?)\*\*/gs, '$1')
+      .replace(/\*([^*\n]+)\*/g,  '$1')
+      .replace(/_([^_\n]+)_/g,    '$1')
+    await tgEdit(token, chatId, msgId, plain)
   }
 }
 
