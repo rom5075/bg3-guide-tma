@@ -4,6 +4,9 @@
   "description": "BG3 Ultimate Guide — Telegram Mini App",
   "type": "module",
   "main": "electron/main.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
