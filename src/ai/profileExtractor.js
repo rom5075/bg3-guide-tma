@@ -38,25 +38,26 @@ Rules:
 export async function extractAndEvaluate(apiKey, userMsg, assistantMsg, existingProfile) {
   if (!apiKey) return null
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'grok-3-fast',
         max_tokens: 450,
-        system: EXTRACTOR_SYSTEM,
-        messages: [{ role: 'user', content: extractorPrompt(userMsg, assistantMsg) }],
+        messages: [
+          { role: 'system', content: EXTRACTOR_SYSTEM },
+          { role: 'user',   content: extractorPrompt(userMsg, assistantMsg) },
+        ],
       }),
     })
 
     if (!res.ok) return null
 
     const data = await res.json()
-    const raw = data.content?.find(b => b.type === 'text')?.text || ''
+    const raw = data.choices?.[0]?.message?.content || ''
 
     // Extract JSON block — model may wrap it in ```json ... ```
     const match = raw.match(/\{[\s\S]*\}/)

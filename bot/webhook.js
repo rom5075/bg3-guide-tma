@@ -163,20 +163,23 @@ async function tgEditMarkdown(token, chatId, msgId, text, replyMarkup = null) {
   }
 }
 
-// ─── Streaming Anthropic call with Tavily tool use ────────────────────────────
+// ─── Streaming xAI (Grok) call with Tavily tool use ──────────────────────────
 
 const WEB_SEARCH_TOOL = {
-  name: 'web_search',
-  description: `Search the internet for any information the user requests. Use when:
+  type: 'function',
+  function: {
+    name: 'web_search',
+    description: `Search the internet for any information the user requests. Use when:
 - User asks about recent events, news, or updates (BG3 patches, real world, anything)
 - User explicitly asks to "find", "search", "look up", or "check" something
 - The question requires up-to-date information you may not have
 - User asks about any topic outside of BG3 that benefits from a web search
 Use a clear, specific search query. For BG3 questions include "Baldur's Gate 3" in the query.`,
-  input_schema: {
-    type: 'object',
-    properties: { query: { type: 'string', description: 'Search query string. Keep it concise and specific.' } },
-    required: ['query'],
+    parameters: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'Search query string. Keep it concise and specific.' } },
+      required: ['query'],
+    },
   },
 }
 
@@ -201,41 +204,46 @@ async function tavilySearch(query) {
 }
 
 /**
- * Stream Anthropic response. Calls onChunk(text) for each streamed text delta.
- * Handles tool use (Tavily search) with a non-streaming second call.
+ * Stream xAI (Grok) response. Calls onChunk(text) for each streamed text delta.
+ * OpenAI-compatible SSE format. Handles tool use (Tavily) with non-streaming 2nd call.
  * @returns {Promise<{ text: string, usedSearch: boolean }>}
  */
 async function streamAI({ apiKey, model, systemPrompt, messages }, onChunk) {
   const hasTavily = !!process.env.TAVILY_API_KEY
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  // System prompt goes into messages array (OpenAI format)
+  const apiMessages = [
+    { role: 'system', content: systemPrompt },
+    ...messages,
+  ]
+
+  const res = await fetch('https://api.x.ai/v1/chat/completions', {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
     body:    JSON.stringify({
       model,
       max_tokens: 1024,
-      system:     systemPrompt,
-      messages,
+      messages:   apiMessages,
       stream:     true,
-      ...(hasTavily ? { tools: [WEB_SEARCH_TOOL], tool_choice: { type: 'auto' } } : {}),
+      ...(hasTavily ? { tools: [WEB_SEARCH_TOOL], tool_choice: 'auto' } : {}),
     }),
   })
 
-  if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`xAI HTTP ${res.status}`)
 
-  const reader  = res.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer    = ''
-  let text      = ''
-  let toolBlock = null   // { id, name, inputJson }
-  let stopReason = null
+  const reader      = res.body.getReader()
+  const decoder     = new TextDecoder()
+  let buffer        = ''
+  let text          = ''
+  let toolCalls     = {}  // index → { id, name, argumentsStr }
+  let finishReason  = null
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split('\n')
-    buffer = lines.pop()  // keep incomplete trailing line
+    buffer = lines.pop()
 
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
@@ -244,54 +252,59 @@ async function streamAI({ apiKey, model, systemPrompt, messages }, onChunk) {
       let ev
       try { ev = JSON.parse(raw) } catch { continue }
 
-      if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
-        toolBlock = { id: ev.content_block.id, name: ev.content_block.name, inputJson: '' }
+      const delta = ev.choices?.[0]?.delta
+      const fr    = ev.choices?.[0]?.finish_reason
+      if (fr) finishReason = fr
+
+      // Text chunk
+      if (delta?.content) {
+        text += delta.content
+        await onChunk(delta.content)
       }
-      if (ev.type === 'content_block_delta') {
-        if (ev.delta?.type === 'text_delta') {
-          text += ev.delta.text
-          await onChunk(ev.delta.text)
+
+      // Tool call chunks (accumulated by index)
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0
+          if (!toolCalls[idx]) toolCalls[idx] = { id: '', name: '', argumentsStr: '' }
+          if (tc.id)                  toolCalls[idx].id            = tc.id
+          if (tc.function?.name)      toolCalls[idx].name          = tc.function.name
+          if (tc.function?.arguments) toolCalls[idx].argumentsStr += tc.function.arguments
         }
-        if (ev.delta?.type === 'input_json_delta' && toolBlock) {
-          toolBlock.inputJson += ev.delta.partial_json
-        }
-      }
-      if (ev.type === 'message_delta') {
-        stopReason = ev.delta?.stop_reason
       }
     }
   }
 
   // Tool use: Tavily search → non-streaming second call
-  if (stopReason === 'tool_use' && toolBlock) {
-    await onChunk('\n\n_🕵️ Ищу свежие сведения..._')
+  if (finishReason === 'tool_calls') {
+    const toolCall = toolCalls[0]
+    if (toolCall?.name === 'web_search') {
+      await onChunk('\n\n_🕵️ Ищу свежие сведения..._')
 
-    let toolInput = {}
-    try { toolInput = JSON.parse(toolBlock.inputJson) } catch {}
+      let args = {}
+      try { args = JSON.parse(toolCall.argumentsStr) } catch {}
+      const searchResult = await tavilySearch(args.query || '')
 
-    const searchResult = await tavilySearch(toolInput.query || '')
+      const continuedMessages = [
+        ...apiMessages,
+        {
+          role:       'assistant',
+          content:    text || null,
+          tool_calls: [{ id: toolCall.id, type: 'function', function: { name: toolCall.name, arguments: toolCall.argumentsStr } }],
+        },
+        { role: 'tool', tool_call_id: toolCall.id, content: searchResult },
+      ]
 
-    const continuedMessages = [
-      ...messages,
-      {
-        role: 'assistant',
-        content: [
-          ...(text ? [{ type: 'text', text }] : []),
-          { type: 'tool_use', id: toolBlock.id, name: toolBlock.name, input: toolInput },
-        ],
-      },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolBlock.id, content: searchResult }] },
-    ]
-
-    const res2 = await fetch('https://api.anthropic.com/v1/messages', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body:    JSON.stringify({ model, max_tokens: 1024, system: systemPrompt, messages: continuedMessages }),
-    })
-    if (!res2.ok) throw new Error(`Anthropic 2nd call HTTP ${res2.status}`)
-    const data2     = await res2.json()
-    const finalText = data2.content?.filter(b => b.type === 'text').map(b => b.text).join('') || ''
-    return { text: finalText, usedSearch: true }
+      const res2 = await fetch('https://api.x.ai/v1/chat/completions', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body:    JSON.stringify({ model, max_tokens: 1024, messages: continuedMessages }),
+      })
+      if (!res2.ok) throw new Error(`xAI 2nd call HTTP ${res2.status}`)
+      const data2     = await res2.json()
+      const finalText = data2.choices?.[0]?.message?.content || ''
+      return { text: finalText, usedSearch: true }
+    }
   }
 
   return { text, usedSearch: false }
@@ -430,7 +443,7 @@ export default async function handler(req) {
   }
 
   const botToken     = process.env.TELEGRAM_BOT_TOKEN
-  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  const anthropicKey = process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY
   const miniAppUrl   = process.env.MINI_APP_URL
   const adminId      = process.env.ADMIN_ID
 
@@ -640,6 +653,8 @@ ${moodLines}`
   // ── Build system prompt ───────────────────────────────────────────────────────
 
   const route = routeQuery(text || 'посмотри на изображение')
+  // Vision requests require a vision-capable model
+  if (hasPhoto) route.model = 'grok-2-vision-1212'
   let systemPrompt = buildSystemPrompt(profile, session, spankMode, dbData, hasPhoto, trialMode)
   if (route.knowledgeKeys.length > 0) {
     systemPrompt += GUIDE_CONTEXT_PREFIX
@@ -653,9 +668,10 @@ ${moodLines}`
     try {
       const fileId = message.photo[message.photo.length - 1].file_id
       const base64 = await downloadPhotoAsBase64(fileId, botToken)
+      // xAI / OpenAI vision format
       userContent = [
-        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
-        { type: 'text',  text: text || 'Что ты видишь?' },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
+        { type: 'text',      text: text || 'Что ты видишь?' },
       ]
     } catch (err) {
       console.error('Photo download error:', err)

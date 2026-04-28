@@ -1,4 +1,4 @@
-// Model routing: Haiku for simple roleplay, Sonnet for complex guide queries
+// Model routing: grok-3-fast for roleplay/simple queries, grok-3 for complex guide queries
 
 const GUIDE_KEYWORDS = {
   builds: ['билд', 'build', 'класс', 'class', 'паладин', 'paladin', 'маг', 'wizard',
@@ -55,7 +55,7 @@ export function routeQuery(message) {
   // Game progress — needs map + party context → Haiku (fast)
   if (isGameProgress) {
     return {
-      model: 'claude-haiku-4-5-20251001',
+      model: 'grok-3-fast',
       queryType: 'game_progress',
       knowledgeKeys: [...new Set([...knowledgeKeys, 'map', 'party'])],
     }
@@ -64,7 +64,7 @@ export function routeQuery(message) {
   // Complex multi-section or long query → Sonnet
   if (isComplex || knowledgeKeys.length > 2) {
     return {
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'grok-3',
       queryType: 'complex_advice',
       knowledgeKeys,
     }
@@ -73,7 +73,7 @@ export function routeQuery(message) {
   // Guide lookup → Haiku
   if (knowledgeKeys.length > 0) {
     return {
-      model: 'claude-haiku-4-5-20251001',
+      model: 'grok-3-fast',
       queryType: 'guide_lookup',
       knowledgeKeys,
     }
@@ -81,7 +81,7 @@ export function routeQuery(message) {
 
   // Pure roleplay → Haiku
   return {
-    model: 'claude-haiku-4-5-20251001',
+    model: 'grok-3-fast',
     queryType: 'roleplay',
     knowledgeKeys: [],
   }

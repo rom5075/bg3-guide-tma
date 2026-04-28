@@ -1,25 +1,29 @@
-// Shared Anthropic API caller with Tavily web search tool use
+// Shared xAI (Grok) API caller with Tavily web search tool use
+// OpenAI-compatible API: https://api.x.ai/v1
 // Used by api/chat.js (Mini App) and api/webhook.js (Telegram bot)
 
-// ─── Tool definition ─────────────────────────────────────────────────────────
+// ─── Tool definition (OpenAI format) ─────────────────────────────────────────
 
 const WEB_SEARCH_TOOL = {
-  name: 'web_search',
-  description: `Search the internet for any information the user requests. Use when:
+  type: 'function',
+  function: {
+    name: 'web_search',
+    description: `Search the internet for any information the user requests. Use when:
 - User asks about recent events, news, or updates (BG3 patches, real world, anything)
 - User explicitly asks to "find", "search", "look up", or "check" something
 - The question requires up-to-date information you may not have
 - User asks about any topic outside of BG3 that benefits from a web search
 Use a clear, specific search query. For BG3 questions include "Baldur's Gate 3" in the query.`,
-  input_schema: {
-    type: 'object',
-    properties: {
-      query: {
-        type: 'string',
-        description: 'Search query string. Keep it concise and specific.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Search query string. Keep it concise and specific.',
+        },
       },
+      required: ['query'],
     },
-    required: ['query'],
   },
 }
 
@@ -45,11 +49,8 @@ async function tavilySearch(query) {
     if (!res.ok) return `Ошибка поиска: ${res.status}`
 
     const data = await res.json()
-
     const parts = []
-    if (data.answer) {
-      parts.push(`КРАТКИЙ ОТВЕТ: ${data.answer}`)
-    }
+    if (data.answer) parts.push(`КРАТКИЙ ОТВЕТ: ${data.answer}`)
     if (data.results?.length) {
       parts.push(
         data.results
@@ -57,7 +58,6 @@ async function tavilySearch(query) {
           .join('\n\n')
       )
     }
-
     return parts.join('\n\n') || 'Результатов не найдено.'
   } catch (err) {
     return `Ошибка поиска: ${err.message}`
@@ -67,11 +67,11 @@ async function tavilySearch(query) {
 // ─── Main callAI function ─────────────────────────────────────────────────────
 
 /**
- * Call Anthropic API with optional Tavily web search tool use.
- * Handles the full agentic loop: call → tool use → call again → final answer.
+ * Call xAI (Grok) API with optional Tavily web search tool use.
+ * OpenAI-compatible format: system prompt goes into messages array.
  *
- * @param {string} apiKey        - Anthropic API key
- * @param {string} model         - Model name (haiku / sonnet)
+ * @param {string} apiKey        - xAI API key
+ * @param {string} model         - Model name (grok-3 / grok-3-fast)
  * @param {string} systemPrompt  - Full system prompt
  * @param {Array}  messages      - Conversation history [{role, content}]
  * @returns {Promise<{ text: string, usedSearch: boolean, searchQuery?: string }>}
@@ -79,81 +79,84 @@ async function tavilySearch(query) {
 export async function callAI(apiKey, model, systemPrompt, messages) {
   const hasTavily = !!process.env.TAVILY_API_KEY
 
+  const apiMessages = [
+    { role: 'system', content: systemPrompt },
+    ...messages,
+  ]
+
   // ── First call ──────────────────────────────────────────────────────────────
-  const firstRes = await fetch('https://api.anthropic.com/v1/messages', {
+  const firstRes = await fetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model,
       max_tokens: 1024,
-      system: systemPrompt,
-      messages,
-      ...(hasTavily ? { tools: [WEB_SEARCH_TOOL], tool_choice: { type: 'auto' } } : {}),
+      messages: apiMessages,
+      ...(hasTavily ? { tools: [WEB_SEARCH_TOOL], tool_choice: 'auto' } : {}),
     }),
   })
 
   if (!firstRes.ok) {
     const err = await firstRes.json().catch(() => ({}))
-    throw new Error(err.error?.message || `Anthropic ${firstRes.status}`)
+    throw new Error(err.error?.message || `xAI ${firstRes.status}`)
   }
 
   const firstData = await firstRes.json()
+  const choice = firstData.choices?.[0]
 
   // ── Tool use requested? ─────────────────────────────────────────────────────
-  if (firstData.stop_reason === 'tool_use') {
-    const toolBlock = firstData.content.find(b => b.type === 'tool_use')
+  if (choice?.finish_reason === 'tool_calls') {
+    const toolCall = choice.message?.tool_calls?.[0]
 
-    if (toolBlock?.name === 'web_search') {
-      const query = toolBlock.input?.query || ''
+    if (toolCall?.function?.name === 'web_search') {
+      let args = {}
+      try { args = JSON.parse(toolCall.function.arguments || '{}') } catch {}
+      const query = args.query || ''
       const searchResult = await tavilySearch(query)
 
-      // Build continued conversation with tool result
       const continuedMessages = [
-        ...messages,
-        { role: 'assistant', content: firstData.content },
+        ...apiMessages,
         {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: toolBlock.id,
-            content: searchResult,
-          }],
+          role: 'assistant',
+          content: null,
+          tool_calls: choice.message.tool_calls,
+        },
+        {
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: searchResult,
         },
       ]
 
       // ── Second call — final answer ──────────────────────────────────────────
-      const finalRes = await fetch('https://api.anthropic.com/v1/messages', {
+      const finalRes = await fetch('https://api.x.ai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
+          'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model,
           max_tokens: 1024,
-          system: systemPrompt,
           messages: continuedMessages,
-          // No tools on second call — just generate the answer
         }),
       })
 
       if (!finalRes.ok) {
         const err = await finalRes.json().catch(() => ({}))
-        throw new Error(err.error?.message || `Anthropic ${finalRes.status}`)
+        throw new Error(err.error?.message || `xAI 2nd call ${finalRes.status}`)
       }
 
       const finalData = await finalRes.json()
-      const text = finalData.content?.filter(b => b.type === 'text').map(b => b.text).join('') || ''
+      const text = finalData.choices?.[0]?.message?.content || ''
       return { text, usedSearch: true, searchQuery: query }
     }
   }
 
   // ── No tool use — direct answer ─────────────────────────────────────────────
-  const text = firstData.content?.filter(b => b.type === 'text').map(b => b.text).join('') || ''
+  const text = choice?.message?.content || ''
   return { text, usedSearch: false }
 }

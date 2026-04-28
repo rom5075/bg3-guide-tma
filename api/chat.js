@@ -94,9 +94,9 @@ export default async function handler(req) {
     return new Response('Method not allowed', { status: 405 })
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'Server misconfigured: missing ANTHROPIC_API_KEY' }), {
+    return new Response(JSON.stringify({ error: 'Server misconfigured: missing XAI_API_KEY' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     })
@@ -145,7 +145,7 @@ export default async function handler(req) {
 
   const route = lastUserMsg
     ? routeQuery(lastContent)
-    : { model: 'claude-haiku-4-5-20251001', queryType: 'roleplay', knowledgeKeys: [] }
+    : { model: 'grok-3-fast', queryType: 'roleplay', knowledgeKeys: [] }
 
   // ── Build system prompt ───────────────────────────────────────────────────────
 
@@ -175,9 +175,10 @@ export default async function handler(req) {
 
   if (hasImage && apiMessages.length > 0) {
     const last = apiMessages[apiMessages.length - 1]
+    // xAI / OpenAI vision format
     last.content = [
-      { type: 'image', source: { type: 'base64', media_type: imageMediaType || 'image/jpeg', data: imageBase64 } },
-      { type: 'text',  text: last.content || 'Что ты видишь?' },
+      { type: 'image_url', image_url: { url: `data:${imageMediaType || 'image/jpeg'};base64,${imageBase64}` } },
+      { type: 'text',      text: last.content || 'Что ты видишь?' },
     ]
   }
 
