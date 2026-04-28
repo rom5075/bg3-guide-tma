@@ -114,7 +114,8 @@ export function useAIChat() {
     try {
       abortRef.current = new AbortController()
 
-      const res = await fetch('/api/chat', {
+      const apiUrl = import.meta.env.VITE_API_URL || '/api/chat'
+      const res = await fetch(apiUrl, {
         method: 'POST',
         signal: abortRef.current.signal,
         headers: { 'Content-Type': 'application/json' },
