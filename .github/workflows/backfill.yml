@@ -1,0 +1,21 @@
+name: Backfill embeddings (Voyage AI)
+
+on:
+  schedule:
+    - cron: '0 22 * * *'   # 22:00 UTC = 03:00 Ekaterinburg (UTC+5)
+  workflow_dispatch:         # ручной запуск из GitHub Actions UI
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run backfill on VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            node --env-file=/var/www/minthara/.env /var/www/minthara/src/db/backfill.js >> /var/log/minthara-backfill.log 2>&1

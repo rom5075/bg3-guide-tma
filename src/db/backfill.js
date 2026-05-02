@@ -1,6 +1,6 @@
 // Backfill embeddings for existing SQLite records
-// Run ONCE on VPS after deploying RAG:
-//   node --env-file=/var/www/minthara/.env /var/www/minthara/src/db/backfill.js
+// Runs daily via GitHub Actions (22:00 UTC = 03:00 Ekaterinburg)
+// Manual run: node --env-file=/var/www/minthara/.env /var/www/minthara/src/db/backfill.js
 
 import * as storage from './sqlite.js'
 import { getEmbedding, serializeVector } from '../ai/embeddings.js'
@@ -19,6 +19,21 @@ const userId = process.env.TELEGRAM_CHAT_ID
 if (!userId) {
   console.error('[backfill] TELEGRAM_CHAT_ID not set — exiting')
   process.exit(1)
+}
+
+// ── Telegram notifications ────────────────────────────────────────────────────
+
+async function sendTelegram(text) {
+  const token  = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = process.env.TELEGRAM_CHAT_ID
+  if (!token || !chatId) return
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    })
+  } catch {}
 }
 
 function sleep(ms) {
@@ -51,10 +66,12 @@ async function backfillTable(label, rows, textKey, table) {
 }
 
 console.log(`[backfill] Starting for userId: ${userId}`)
+await sendTelegram('🕵️ <i>Тени отправились в разведку... Обновляю слои памяти о тебе.</i>')
 
-await backfillTable('memories',     storage.getAllMemories(userId), 'summary', 'memories')
-await backfillTable('nights',       storage.getAllNights(userId),   'summary', 'intimate_log')
-await backfillTable('facts',        storage.getAllFacts(userId),    'fact',    'known_facts')
+await backfillTable('memories', storage.getAllMemories(userId), 'summary', 'memories')
+await backfillTable('nights',   storage.getAllNights(userId),   'summary', 'intimate_log')
+await backfillTable('facts',    storage.getAllFacts(userId),    'fact',    'known_facts')
 
 console.log('[backfill] All done ✓')
+await sendTelegram('✅ <i>Разведка завершена. Слои памяти обновлены — всё сохранено в вечности.</i>')
 process.exit(0)
